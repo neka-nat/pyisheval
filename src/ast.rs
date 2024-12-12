@@ -29,6 +29,7 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Mod,
 }
 
 impl fmt::Display for BinOp {
@@ -38,6 +39,7 @@ impl fmt::Display for BinOp {
             BinOp::Sub => write!(f, "-"),
             BinOp::Mul => write!(f, "*"),
             BinOp::Div => write!(f, "/"),
+            BinOp::Mod => write!(f, "%"),
         }
     }
 }

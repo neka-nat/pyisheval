@@ -28,6 +28,10 @@ pub enum Value {
         name: String,
         func: BuiltinFn,
     },
+    List(Vec<Value>),
+    Tuple(Vec<Value>),
+    Set(Vec<Value>),
+    Dict(HashMap<String, Value>),
 }
 
 impl std::fmt::Display for Value {
@@ -36,6 +40,29 @@ impl std::fmt::Display for Value {
             Value::Number(n) => write!(f, "{}", n),
             Value::Lambda { param, .. } => write!(f, "<lambda {}>", param),
             Value::Builtin { name, .. } => write!(f, "<builtin {}>", name),
+            Value::List(v) => {
+                let strs: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+                write!(f, "[{}]", strs.join(", "))
+            }
+            Value::Tuple(v) => {
+                let strs: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+                if v.len() == 1 {
+                    write!(f, "({},)", strs[0])
+                } else {
+                    write!(f, "({})", strs.join(", "))
+                }
+            }
+            Value::Set(v) => {
+                let strs: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+                write!(f, "{{{}}}", strs.join(", "))
+            }
+            Value::Dict(m) => {
+                let mut pairs = vec![];
+                for (k, val) in m {
+                    pairs.push(format!("{}: {}", k, val));
+                }
+                write!(f, "{{{}}}", pairs.join(", "))
+            }
         }
     }
 }
@@ -98,6 +125,8 @@ pub enum EvalError {
     ParseError(String),
     #[error("Argument error in builtin function: {0}")]
     ArgError(String),
+    #[error("Dict key error: keys must be identifiers")]
+    DictKeyError,
 }
 
 impl Env {
@@ -259,7 +288,7 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                     body,
                     env: closure_env,
                 } => {
-                    // Lambdaは1引数想定（元コードが1引数のみ扱い）
+                    // Lambdaは1引数想定
                     if arg_vals.len() != 1 {
                         return Err(EvalError::LambdaCallError);
                     }
@@ -271,7 +300,6 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                     Ok((res, new_env))
                 }
                 Value::Builtin { name: _, func } => {
-                    // 全ての引数はNumberである必要がある
                     let mut nums = Vec::new();
                     for v in arg_vals {
                         match v {
@@ -284,6 +312,48 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                 }
                 _ => Err(EvalError::LambdaCallError),
             }
+        }
+        Expr::List(exprs) => {
+            let mut vals = Vec::new();
+            let mut cur_env = env;
+            for e in exprs {
+                let (val, e2) = eval_expr(e, cur_env)?;
+                cur_env = e2;
+                vals.push(val);
+            }
+            Ok((Value::List(vals), cur_env))
+        }
+        Expr::Tuple(exprs) => {
+            let mut vals = Vec::new();
+            let mut cur_env = env;
+            for e in exprs {
+                let (val, e2) = eval_expr(e, cur_env)?;
+                cur_env = e2;
+                vals.push(val);
+            }
+            Ok((Value::Tuple(vals), cur_env))
+        }
+        Expr::Set(exprs) => {
+            let mut vals = Vec::new();
+            let mut cur_env = env;
+            for e in exprs {
+                let (val, e2) = eval_expr(e, cur_env)?;
+                cur_env = e2;
+                vals.push(val);
+            }
+            // 本来はsetなら重複排除など必要だが、ここでは簡易実装
+            Ok((Value::Set(vals), cur_env))
+        }
+        Expr::Dict(pairs) => {
+            let mut map = HashMap::new();
+            let mut cur_env = env;
+            for (k, v) in pairs {
+                // kはStringとしてASTに格納されている想定
+                let (val, e2) = eval_expr(v, cur_env)?;
+                cur_env = e2;
+                map.insert(k, val);
+            }
+            Ok((Value::Dict(map), cur_env))
         }
     }
 }

@@ -21,6 +21,10 @@ pub enum Expr {
         func: Box<Expr>,
         args: Vec<Expr>,
     },
+    List(Vec<Expr>),
+    Tuple(Vec<Expr>),
+    Set(Vec<Expr>),
+    Dict(Vec<(String, Expr)>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

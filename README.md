@@ -6,6 +6,7 @@ It's not a full Python interpreter, but it supports a subset of Python-like synt
 - Arithmetic operations: `+`, `-`, `*`, `/`
 - Variables and assignments
 - Lambda expressions (`lambda x: x + 1`)
+- Built-in functions: `abs`, `max`, `min`
 
 No classes, functions (def), or control structures are supported.
 

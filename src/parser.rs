@@ -1,13 +1,13 @@
 use crate::ast::{BinOp, Expr};
 use nom::error::Error;
 use nom::error::ErrorKind;
-use nom::sequence::tuple;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0},
     combinator::opt,
-    sequence::{pair, preceded},
+    multi::separated_list0,
+    sequence::{delimited, pair, preceded},
     IResult,
 };
 
@@ -18,7 +18,7 @@ use nom::{
 /// additive := multiplicative (("+" | "-") multiplicative)*
 /// multiplicative := primary (("*" | "/") primary)*
 /// primary := number | identifier | "(" expr ")" | call_expr
-/// call_expr := (identifier | lambda_expr) "(" expr ")"
+/// call_expr := (identifier | lambda_expr) "(" [expr ("," expr)*] ")"
 ///
 /// number := [0-9]+ ("." [0-9]+)?
 /// identifier := [a-zA-Z_][a-zA-Z0-9_]*
@@ -152,19 +152,21 @@ fn call_or_var(input: &str) -> IResult<&str, Expr> {
     let (input, e) = alt((lambda_expr, var_expr))(input)?;
     let (input, _) = multispace0(input)?;
 
-    let (input, maybe_call) = opt(tuple((
+    let (input, maybe_call) = opt(delimited(
         char('('),
-        multispace0,
-        expr_wrapper,
-        multispace0,
+        separated_list0(
+            preceded(multispace0, char(',')),
+            preceded(multispace0, expr_wrapper),
+        ),
         char(')'),
-    )))(input)?;
-    if let Some((_, _, arg, _, _)) = maybe_call {
+    ))(input)?;
+
+    if let Some(args) = maybe_call {
         Ok((
             input,
             Expr::Call {
                 func: Box::new(e),
-                arg: Box::new(arg),
+                args,
             },
         ))
     } else {
@@ -192,7 +194,7 @@ fn number(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::Number(val)))
 }
 
-fn recognize_float(input: &str) -> IResult<&str, &str> {
+fn recognize_float(input: &str) -> IResult<&str, String> {
     let (input, integer_part) = take_while1(|c: char| c.is_ascii_digit())(input)?;
     let (input, fractional_part) = opt(preceded(
         char('.'),
@@ -200,18 +202,11 @@ fn recognize_float(input: &str) -> IResult<&str, &str> {
     ))(input)?;
 
     if let Some(frac) = fractional_part {
-        Ok((input, &input[..0])) // trick: we need to return full match
-            .map(|_| {
-                let end_idx = integer_part.len() + 1 + frac.len();
-                (&input[end_idx..], &input[..end_idx + integer_part.len()])
-            })
-            .and_then(|_| Ok((input, &input[0..integer_part.len() + 1 + frac.len()])))
-            .map_err(|_: nom::error::Error<&str>| {
-                nom::Err::Failure(Error::new(input, ErrorKind::Tag))
-            })
+        // construct full number string
+        let full_num = format!("{}.{}", integer_part, frac);
+        Ok((input, full_num))
     } else {
-        // no fraction
-        Ok((input, integer_part))
+        Ok((input, integer_part.to_string()))
     }
 }
 

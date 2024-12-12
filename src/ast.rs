@@ -19,7 +19,7 @@ pub enum Expr {
     },
     Call {
         func: Box<Expr>,
-        arg: Box<Expr>,
+        args: Vec<Expr>,
     },
 }
 

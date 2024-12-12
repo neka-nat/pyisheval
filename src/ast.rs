@@ -25,6 +25,12 @@ pub enum Expr {
     Tuple(Vec<Expr>),
     Set(Vec<Expr>),
     Dict(Vec<(String, Expr)>),
+    ListComp {
+        expr: Box<Expr>,
+        var: String,
+        iter: Box<Expr>,
+        cond: Option<Box<Expr>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +42,12 @@ pub enum BinOp {
     FloorDiv,
     Mod,
     Exp,
+    Gt,
+    Lt,
+    Ge,
+    Le,
+    Eq,
+    Ne,
 }
 
 impl fmt::Display for BinOp {
@@ -48,6 +60,12 @@ impl fmt::Display for BinOp {
             BinOp::FloorDiv => write!(f, "//"),
             BinOp::Mod => write!(f, "%"),
             BinOp::Exp => write!(f, "**"),
+            BinOp::Gt => write!(f, ">"),
+            BinOp::Lt => write!(f, "<"),
+            BinOp::Ge => write!(f, ">="),
+            BinOp::Le => write!(f, "<="),
+            BinOp::Eq => write!(f, "=="),
+            BinOp::Ne => write!(f, "!="),
         }
     }
 }

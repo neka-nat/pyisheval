@@ -41,4 +41,21 @@ mod test {
         interp.eval("x = [1, 2, 3]").unwrap();
         assert_eq!(interp.eval("len(x)").unwrap().to_string(), "3");
     }
+
+    #[test]
+    fn test_list_comp() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = [1, 2, 3, 4, 5]").unwrap();
+        assert_eq!(
+            interp.eval("[y * 2 for y in x]").unwrap().to_string(),
+            "[2, 4, 6, 8, 10]"
+        );
+        assert_eq!(
+            interp
+                .eval("[y * 2 for y in x if y > 2]")
+                .unwrap()
+                .to_string(),
+            "[6, 8, 10]"
+        );
+    }
 }

@@ -36,6 +36,7 @@ pub enum Value {
     Tuple(Vec<Value>),
     Set(Vec<Value>),
     Dict(HashMap<String, Value>),
+    Var(String),
 }
 
 impl std::fmt::Display for Value {
@@ -68,6 +69,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "{{{}}}", pairs.join(", "))
             }
+            Value::Var(v) => write!(f, "{}", v),
         }
     }
 }
@@ -283,6 +285,12 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                 BinOp::FloorDiv => Value::Number(ln.floor() / rn.floor()),
                 BinOp::Mod => Value::Number(ln % rn),
                 BinOp::Exp => Value::Number(ln.powf(rn)),
+                BinOp::Gt => Value::Number(if ln > rn { 1.0 } else { 0.0 }),
+                BinOp::Lt => Value::Number(if ln < rn { 1.0 } else { 0.0 }),
+                BinOp::Ge => Value::Number(if ln >= rn { 1.0 } else { 0.0 }),
+                BinOp::Le => Value::Number(if ln <= rn { 1.0 } else { 0.0 }),
+                BinOp::Eq => Value::Number(if ln == rn { 1.0 } else { 0.0 }),
+                BinOp::Ne => Value::Number(if ln != rn { 1.0 } else { 0.0 }),
             };
             Ok((val, env))
         }
@@ -312,7 +320,11 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
             }
 
             match fval {
-                Value::Lambda { param, body, env: closure_env } => {
+                Value::Lambda {
+                    param,
+                    body,
+                    env: closure_env,
+                } => {
                     // Lambdaは1引数想定
                     if arg_vals.len() != 1 {
                         return Err(EvalError::LambdaCallError);
@@ -385,5 +397,59 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
             }
             Ok((Value::Dict(map), cur_env))
         }
+        Expr::ListComp {
+            expr,
+            var,
+            iter,
+            cond,
+        } => {
+            // iterを評価
+            let (iter_val, env) = eval_expr(*iter, env)?;
+
+            // iter_valがList, Tuple, Set, Dictのいずれか
+            let items: Vec<Value> = match iter_val {
+                Value::List(v) => v,
+                Value::Tuple(v) => v,
+                Value::Set(v) => v,
+                Value::Dict(m) => {
+                    // Dictの場合はキーをイテレートすることにします(簡略)
+                    m.into_iter().map(|(k, _)| Value::Var(k)).collect()
+                }
+                _ => return Err(EvalError::TypeError),
+            };
+
+            let mut result = Vec::new();
+            let current_env = env.clone();
+            for item in items {
+                // varにitemをバインドした環境でexprを評価
+                let mut new_env_data = (*current_env).clone();
+                new_env_data.set(&var, item);
+                let new_env = Rc::new(new_env_data);
+
+                // 条件式チェック
+                if let Some(cond_expr) = &cond {
+                    let (cond_val, _) = eval_expr((**cond_expr).clone(), Rc::clone(&new_env))?;
+                    if !is_truthy(&cond_val) {
+                        continue; // 条件を満たさないのでスキップ
+                    }
+                }
+
+                let (val, _) = eval_expr((*expr).clone(), new_env)?;
+                result.push(val);
+            }
+
+            Ok((Value::List(result), env))
+        }
+    }
+}
+
+fn is_truthy(val: &Value) -> bool {
+    match val {
+        Value::Number(n) => *n != 0.0,
+        Value::List(v) => !v.is_empty(),
+        Value::Tuple(v) => !v.is_empty(),
+        Value::Set(v) => !v.is_empty(),
+        Value::Dict(m) => !m.is_empty(),
+        _ => false, // 簡易的に、それ以外はfalse扱い
     }
 }

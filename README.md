@@ -3,11 +3,12 @@
 `pyisheval` is a Rust library that allows you to evaluate Python-like expressions.  
 It's not a full Python interpreter, but it supports a subset of Python-like syntax:
 
-- Arithmetic operations: `+`, `-`, `*`, `/`, `//`, `%`, `**`
+- Arithmetic operations: `+`, `-`, `*`, `/`, `//`, `%`, `**`, `>`, `<`, `>=`, `<=`, `==`, `!=`
 - Variables and assignments
 - Lambda expressions (`lambda x: x + 1`)
 - Built-in functions: `abs`, `max`, `min`, `int`, `float`, `len`
 - List and dictionary literals
+- List comprehensions: `[y * 2 for y in x]`
 
 No classes, functions (def), or control structures are supported.
 

@@ -12,9 +12,10 @@ use nom::{
 };
 
 /// Grammar (informal):
-/// expr := assignment | lambda_expr | additive
+/// expr := assignment | comparison | lambda_expr | additive
 /// assignment := identifier "=" expr
 /// lambda_expr := "lambda" identifier ":" expr
+/// comparison := additive ((">" | "<" | ">=" | "<=" | "==" | "!=") additive)*
 /// additive := multiplicative (("+" | "-") multiplicative)*
 /// multiplicative := primary (("*" | "/" | "%") primary)*
 /// primary := number | identifier | "(" ... ")" | "[" ... "]" | "{" ... "}" | call_expr
@@ -46,7 +47,7 @@ fn top_level_expr(input: &str) -> IResult<&str, Expr> {
 
 fn assignment(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
-    let (input, first) = alt((lambda_expr, additive))(input)?;
+    let (input, first) = alt((lambda_expr, comparison))(input)?;
     let (input, _) = multispace0(input)?;
 
     let res = opt(pair(
@@ -91,6 +92,51 @@ fn lambda_expr(input: &str) -> IResult<&str, Expr> {
             body: Box::new(body),
         },
     ))
+}
+
+fn comparison(input: &str) -> IResult<&str, Expr> {
+    let (input, mut expr) = additive(input)?;
+    let (mut input, _) = multispace0(input)?;
+
+    loop {
+        // 比較演算子をパース
+        // 順番に注意: ">="を先に試し、それから">"、最後に"=="を試す
+        // 実際には == と > を同じ並びでaltしてもよいですが、
+        // >= や == のような2文字演算子は先に試す方が安全です
+        let (next_input, opt_op) = opt(alt((
+            tag(">="),
+            tag(">"),
+            tag("=="),
+            tag("!="),
+            tag("<="),
+            tag("<"),
+        )))(input)?;
+
+        if let Some(op_str) = opt_op {
+            let op = match op_str {
+                ">=" => BinOp::Ge,
+                ">" => BinOp::Gt,
+                "==" => BinOp::Eq,
+                "!=" => BinOp::Ne,
+                "<=" => BinOp::Le,
+                "<" => BinOp::Lt,
+                _ => unreachable!(),
+            };
+
+            let (next_input2, _) = multispace0(next_input)?;
+            let (next_input2, right) = additive(next_input2)?;
+            expr = Expr::BinaryOp {
+                op,
+                left: Box::new(expr),
+                right: Box::new(right),
+            };
+            input = next_input2;
+        } else {
+            break;
+        }
+    }
+
+    Ok((input, expr))
 }
 
 fn additive(input: &str) -> IResult<&str, Expr> {
@@ -186,15 +232,95 @@ fn primary(input: &str) -> IResult<&str, Expr> {
 }
 
 fn list_literal(input: &str) -> IResult<&str, Expr> {
-    let (input, vec) = delimited(
-        preceded(multispace0, char('[')),
-        separated_list0(
-            preceded(multispace0, char(',')),
-            preceded(multispace0, expr_wrapper),
-        ),
-        preceded(multispace0, char(']')),
-    )(input)?;
-    Ok((input, Expr::List(vec)))
+    // list_literalは基本的に`[ expr (, expr)* ]`をパースしていましたが、
+    // `[`を読んだ後、`expr`を読んで`for`が続く場合はlist comprehensionと判断します。
+
+    let (input, _) = preceded(multispace0, char('['))(input)?;
+    let (input, _) = multispace0(input)?;
+
+    // まず最初のexprをパース
+    let (input, first_expr) = opt(expr_wrapper)(input)?;
+    let (input, _) = multispace0(input)?;
+
+    // list comprehensionかどうかチェック
+    if let Some(fe) = first_expr {
+        // `for`が続いているか
+        if let Ok((input2, _)) = preceded::<&str, &str, &str, nom::error::Error<&str>, _, _>(
+            multispace0::<&str, nom::error::Error<&str>>,
+            tag::<&str, &str, nom::error::Error<&str>>("for"),
+        )(input)
+        {
+            // list comprehension
+            let (input2, _) = multispace0(input2)?;
+            let (input2, var_name) = identifier(input2)?;
+            let (input2, _) = multispace0(input2)?;
+            let (input2, _) = tag("in")(input2)?;
+            let (input2, _) = multispace0(input2)?;
+            let (input2, iter_expr) = expr_wrapper(input2)?;
+            let (input2, _) = multispace0(input2)?;
+
+            // ifがあるか？
+            let (input2, cond_expr) = if let Ok((input3, _)) =
+                preceded::<&str, &str, &str, nom::error::Error<&str>, _, _>(
+                    multispace0::<&str, nom::error::Error<&str>>,
+                    tag::<&str, &str, nom::error::Error<&str>>("if"),
+                )(input2)
+            {
+                let (input3, _) = multispace0(input3)?;
+                let (input3, cexpr) = expr_wrapper(input3)?;
+                (input3, Some(cexpr))
+            } else {
+                (input2, None)
+            };
+
+            let (input2, _) = multispace0(input2)?;
+            let (input2, _) = char(']')(input2)?;
+
+            return Ok((
+                input2,
+                Expr::ListComp {
+                    expr: Box::new(fe),
+                    var: var_name,
+                    iter: Box::new(iter_expr),
+                    cond: cond_expr.map(Box::new),
+                },
+            ));
+        } else {
+            // 単なるリスト
+            // first_exprがあり、続いてカンマがあれば複数要素
+            let mut elems = vec![fe];
+            let (mut input, _) = multispace0(input)?;
+            loop {
+                let (ni, opt_comma) = opt(char(','))(input)?;
+                if opt_comma.is_some() {
+                    let (ni, _) = multispace0(ni)?;
+                    // 次のexprをパース
+                    let (ni, next_expr) = opt(expr_wrapper)(ni)?;
+                    if let Some(ne) = next_expr {
+                        elems.push(ne);
+                        input = ni;
+                        continue;
+                    } else {
+                        // カンマ後にexprがなければリスト終わり？
+                        input = ni;
+                        break;
+                    }
+                } else {
+                    // カンマがないので終わり
+                    input = ni;
+                    break;
+                }
+            }
+            let (input, _) = multispace0(input)?;
+            let (input, _) = char(']')(input)?;
+            return Ok((input, Expr::List(elems)));
+        }
+    } else {
+        // 空リスト
+        let (input, _) = multispace0(input)?;
+        let (input, _) = char(']')(input)?;
+        return Ok((input, Expr::List(vec![])));
+    }
 }
 
 /// parse_dict_item_or_expr:

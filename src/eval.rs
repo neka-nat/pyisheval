@@ -63,6 +63,27 @@ fn builtin_min(args: &[f64]) -> Result<f64, EvalError> {
     Ok(args.iter().cloned().fold(f64::INFINITY, f64::min))
 }
 
+fn builtin_int(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("int".to_string()));
+    }
+    Ok(args[0].floor())
+}
+
+fn builtin_round(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("round".to_string()));
+    }
+    Ok(args[0].round())
+}
+
+fn builtin_float(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("float".to_string()));
+    }
+    Ok(args[0])
+}
+
 #[derive(Debug, Error)]
 pub enum EvalError {
     #[error("Undefined variable: {0}")]
@@ -136,6 +157,27 @@ impl Interpreter {
             Value::Builtin {
                 name: "min".to_string(),
                 func: builtin_min,
+            },
+        );
+        base_env.set(
+            "int",
+            Value::Builtin {
+                name: "int".to_string(),
+                func: builtin_int,
+            },
+        );
+        base_env.set(
+            "round",
+            Value::Builtin {
+                name: "round".to_string(),
+                func: builtin_round,
+            },
+        );
+        base_env.set(
+            "float",
+            Value::Builtin {
+                name: "float".to_string(),
+                func: builtin_float,
             },
         );
 

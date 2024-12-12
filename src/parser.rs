@@ -121,8 +121,32 @@ fn additive(input: &str) -> IResult<&str, Expr> {
     Ok((input, expr))
 }
 
+fn exponentiation(input: &str) -> IResult<&str, Expr> {
+    let (input, base_expr) = primary(input)?;
+    let (input, _) = multispace0::<&str, nom::error::Error<&str>>(input)?;
+    // 右結合: exponentiationは再帰的パースする
+    if let Ok((input2, _)) = preceded::<&str, &str, &str, nom::error::Error<&str>, _, _>(
+        multispace0::<&str, nom::error::Error<&str>>,
+        tag::<&str, &str, nom::error::Error<&str>>("**"),
+    )(input)
+    {
+        let (input3, exp_expr) = exponentiation(input2)?;
+        Ok((
+            input3,
+            Expr::BinaryOp {
+                op: BinOp::Exp,
+                left: Box::new(base_expr),
+                right: Box::new(exp_expr),
+            },
+        ))
+    } else {
+        Ok((input, base_expr))
+    }
+}
+
 fn multiplicative(input: &str) -> IResult<&str, Expr> {
-    let (input, mut expr) = primary(input)?;
+    // multiplicative := exponentiation (("*" | "/" | "%") exponentiation)*
+    let (input, mut expr) = exponentiation(input)?;
     let (mut input, _) = multispace0(input)?;
 
     loop {
@@ -135,7 +159,7 @@ fn multiplicative(input: &str) -> IResult<&str, Expr> {
                 _ => unreachable!(),
             };
             let (next_input2, _) = multispace0(next_input)?;
-            let (next_input2, right) = primary(next_input2)?;
+            let (next_input2, right) = exponentiation(next_input2)?;
             expr = Expr::BinaryOp {
                 op,
                 left: Box::new(expr),

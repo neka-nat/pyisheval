@@ -254,6 +254,7 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                     Value::Number(ln / rn)
                 }
                 BinOp::Mod => Value::Number(ln % rn),
+                BinOp::Exp => Value::Number(ln.powf(rn)),
             };
             Ok((val, env))
         }

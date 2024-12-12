@@ -28,6 +28,10 @@ pub enum Value {
         name: String,
         func: BuiltinFn,
     },
+    BuiltinValue {
+        name: String,
+        func: BuiltinValueFn,
+    },
     List(Vec<Value>),
     Tuple(Vec<Value>),
     Set(Vec<Value>),
@@ -40,6 +44,7 @@ impl std::fmt::Display for Value {
             Value::Number(n) => write!(f, "{}", n),
             Value::Lambda { param, .. } => write!(f, "<lambda {}>", param),
             Value::Builtin { name, .. } => write!(f, "<builtin {}>", name),
+            Value::BuiltinValue { name, .. } => write!(f, "<builtin {}>", name),
             Value::List(v) => {
                 let strs: Vec<String> = v.iter().map(|x| x.to_string()).collect();
                 write!(f, "[{}]", strs.join(", "))
@@ -68,6 +73,7 @@ impl std::fmt::Display for Value {
 }
 
 type BuiltinFn = fn(&[f64]) -> Result<f64, EvalError>;
+type BuiltinValueFn = fn(&[Value]) -> Result<Value, EvalError>;
 
 fn builtin_abs(args: &[f64]) -> Result<f64, EvalError> {
     if args.len() != 1 {
@@ -109,6 +115,20 @@ fn builtin_float(args: &[f64]) -> Result<f64, EvalError> {
         return Err(EvalError::ArgError("float".to_string()));
     }
     Ok(args[0])
+}
+
+fn builtin_len_value(args: &[Value]) -> Result<Value, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("len".to_string()));
+    }
+
+    match &args[0] {
+        Value::List(v) => Ok(Value::Number(v.len() as f64)),
+        Value::Tuple(v) => Ok(Value::Number(v.len() as f64)),
+        Value::Set(v) => Ok(Value::Number(v.len() as f64)),
+        Value::Dict(m) => Ok(Value::Number(m.len() as f64)),
+        _ => Err(EvalError::TypeError),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -209,6 +229,13 @@ impl Interpreter {
                 func: builtin_float,
             },
         );
+        base_env.set(
+            "len",
+            Value::BuiltinValue {
+                name: "len".to_string(),
+                func: builtin_len_value,
+            },
+        );
 
         Interpreter {
             env: Rc::new(base_env),
@@ -253,6 +280,7 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                     }
                     Value::Number(ln / rn)
                 }
+                BinOp::FloorDiv => Value::Number(ln.floor() / rn.floor()),
                 BinOp::Mod => Value::Number(ln % rn),
                 BinOp::Exp => Value::Number(ln.powf(rn)),
             };
@@ -284,11 +312,7 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
             }
 
             match fval {
-                Value::Lambda {
-                    param,
-                    body,
-                    env: closure_env,
-                } => {
+                Value::Lambda { param, body, env: closure_env } => {
                     // Lambdaは1引数想定
                     if arg_vals.len() != 1 {
                         return Err(EvalError::LambdaCallError);
@@ -310,6 +334,11 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                     }
                     let res_num = func(&nums)?;
                     Ok((Value::Number(res_num), new_env))
+                }
+                // lenなどValueベースの関数
+                Value::BuiltinValue { name: _, func } => {
+                    let res_val = func(&arg_vals)?;
+                    Ok((res_val, new_env))
                 }
                 _ => Err(EvalError::LambdaCallError),
             }

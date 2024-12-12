@@ -34,4 +34,11 @@ mod test {
         interp.eval("double = lambda a: a*2").unwrap();
         assert_eq!(interp.eval("double(5)").unwrap().to_string(), "10");
     }
+
+    #[test]
+    fn test_builtin_len_value() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = [1, 2, 3]").unwrap();
+        assert_eq!(interp.eval("len(x)").unwrap().to_string(), "3");
+    }
 }

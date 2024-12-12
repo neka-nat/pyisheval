@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/neka-nat/pyisheval"
 readme = "README.md"
 keywords = ["python", "eval", "expression", "lambda", "interpreter"]
-categories = ["development-tools::debugging", "text-processing::parsing"]
+categories = ["development-tools::debugging"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

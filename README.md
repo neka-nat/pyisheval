@@ -10,6 +10,12 @@ It's not a full Python interpreter, but it supports a subset of Python-like synt
 
 No classes, functions (def), or control structures are supported.
 
+## Installation
+
+```sh
+cargo add pyisheval
+```
+
 ## Example
 
 ```rust

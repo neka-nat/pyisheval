@@ -461,7 +461,9 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                 }
                 Value::Dict(m) => {
                     let k = extract_key(&index_val)?;
-                    m.get(&k).cloned().ok_or_else(|| EvalError::UndefinedVar(k))?
+                    m.get(&k)
+                        .cloned()
+                        .ok_or_else(|| EvalError::UndefinedVar(k))?
                 }
                 _ => return Err(EvalError::TypeError),
             };
@@ -494,7 +496,7 @@ fn extract_index(val: &Value) -> Result<usize, EvalError> {
             }
             Ok(i)
         }
-        _ => Err(EvalError::TypeError)
+        _ => Err(EvalError::TypeError),
     }
 }
 
@@ -502,6 +504,6 @@ fn extract_key(val: &Value) -> Result<String, EvalError> {
     match val {
         Value::Var(s) => Ok(s.clone()),
         Value::StringLit(s) => Ok(s.clone()),
-        _ => Err(EvalError::TypeError)
+        _ => Err(EvalError::TypeError),
     }
 }

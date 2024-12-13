@@ -237,11 +237,7 @@ fn index_access(input: &str, expr: Expr) -> IResult<&str, Expr> {
     let mut current_expr = expr;
     let (mut input, _) = multispace0(input)?;
     loop {
-        let (next_input, maybe_idx) = opt(delimited(
-            char('['),
-            expr_wrapper,
-            char(']')
-        ))(input)?;
+        let (next_input, maybe_idx) = opt(delimited(char('['), expr_wrapper, char(']')))(input)?;
 
         if let Some(idx_expr) = maybe_idx {
             current_expr = Expr::Index {

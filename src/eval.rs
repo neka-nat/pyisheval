@@ -37,6 +37,7 @@ pub enum Value {
     Set(Vec<Value>),
     Dict(HashMap<String, Value>),
     Var(String),
+    StringLit(String),
 }
 
 impl std::fmt::Display for Value {
@@ -70,6 +71,7 @@ impl std::fmt::Display for Value {
                 write!(f, "{{{}}}", pairs.join(", "))
             }
             Value::Var(v) => write!(f, "{}", v),
+            Value::StringLit(s) => write!(f, "{}", s),
         }
     }
 }
@@ -261,6 +263,7 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                 .ok_or_else(|| EvalError::UndefinedVar(name))?;
             Ok((val, env))
         }
+        Expr::StringLit(s) => Ok((Value::StringLit(s), env)),
         Expr::BinaryOp { op, left, right } => {
             let (lval, env) = eval_expr(*left, env)?;
             let (rval, env) = eval_expr(*right, env)?;
@@ -440,6 +443,30 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
 
             Ok((Value::List(result), env))
         }
+        Expr::Index { expr, index } => {
+            let (container_val, env) = eval_expr(*expr, env)?;
+            let (index_val, env) = eval_expr(*index, env)?;
+            let val = match container_val {
+                Value::List(v) => {
+                    let i = extract_index(&index_val)?;
+                    v.get(i).cloned().ok_or_else(|| EvalError::TypeError)?
+                }
+                Value::Tuple(v) => {
+                    let i = extract_index(&index_val)?;
+                    v.get(i).cloned().ok_or_else(|| EvalError::TypeError)?
+                }
+                Value::Set(v) => {
+                    let i = extract_index(&index_val)?;
+                    v.get(i).cloned().ok_or_else(|| EvalError::TypeError)?
+                }
+                Value::Dict(m) => {
+                    let k = extract_key(&index_val)?;
+                    m.get(&k).cloned().ok_or_else(|| EvalError::UndefinedVar(k))?
+                }
+                _ => return Err(EvalError::TypeError),
+            };
+            Ok((val, env))
+        }
     }
 }
 
@@ -451,5 +478,30 @@ fn is_truthy(val: &Value) -> bool {
         Value::Set(v) => !v.is_empty(),
         Value::Dict(m) => !m.is_empty(),
         _ => false, // 簡易的に、それ以外はfalse扱い
+    }
+}
+
+fn extract_index(val: &Value) -> Result<usize, EvalError> {
+    match val {
+        Value::Number(n) => {
+            if *n < 0.0 {
+                return Err(EvalError::TypeError);
+            }
+            let i = *n as usize;
+            if (i as f64 - n).abs() > f64::EPSILON {
+                // 小数部分がある場合はエラー
+                return Err(EvalError::TypeError);
+            }
+            Ok(i)
+        }
+        _ => Err(EvalError::TypeError)
+    }
+}
+
+fn extract_key(val: &Value) -> Result<String, EvalError> {
+    match val {
+        Value::Var(s) => Ok(s.clone()),
+        Value::StringLit(s) => Ok(s.clone()),
+        _ => Err(EvalError::TypeError)
     }
 }

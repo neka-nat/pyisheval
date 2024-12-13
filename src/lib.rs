@@ -36,6 +36,30 @@ mod test {
     }
 
     #[test]
+    fn test_comparison() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("1 > 2").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("1 < 2").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("1 >= 2").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("1 <= 2").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("1 == 2").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("1 != 2").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_initialize_iterable() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = [1, 2, 3]").unwrap();
+        assert_eq!(interp.eval("x[0]").unwrap().to_string(), "1");
+        interp.eval("y = (1, 2, 3)").unwrap();
+        assert_eq!(interp.eval("y[0]").unwrap().to_string(), "1");
+        interp.eval("z = {1, 2, 3}").unwrap();
+        assert_eq!(interp.eval("z[0]").unwrap().to_string(), "1");
+        interp.eval("w = {'a': 2, 'b': 3}").unwrap();
+        assert_eq!(interp.eval("w['a']").unwrap().to_string(), "2");
+    }
+
+    #[test]
     fn test_builtin_len_value() {
         let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3]").unwrap();

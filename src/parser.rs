@@ -222,13 +222,38 @@ fn multiplicative(input: &str) -> IResult<&str, Expr> {
 
 fn primary(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
-    alt((
+    let (input, expr) = alt((
         parenthesized_or_tuple,
         list_literal,
         dict_or_set,
         number,
+        string_lit,
         call_or_var,
-    ))(input)
+    ))(input)?;
+    index_access(input, expr)
+}
+
+fn index_access(input: &str, expr: Expr) -> IResult<&str, Expr> {
+    let mut current_expr = expr;
+    let (mut input, _) = multispace0(input)?;
+    loop {
+        let (next_input, maybe_idx) = opt(delimited(
+            char('['),
+            expr_wrapper,
+            char(']')
+        ))(input)?;
+
+        if let Some(idx_expr) = maybe_idx {
+            current_expr = Expr::Index {
+                expr: Box::new(current_expr),
+                index: Box::new(idx_expr),
+            };
+            input = next_input;
+        } else {
+            break;
+        }
+    }
+    Ok((input, current_expr))
 }
 
 fn list_literal(input: &str) -> IResult<&str, Expr> {
@@ -367,6 +392,8 @@ fn dict_or_set(input: &str) -> IResult<&str, Expr> {
             // キーはidentifier(Var)でなければならない
             if let Expr::Var(k_str) = k_expr {
                 dict_pairs.push((k_str, v_expr));
+            } else if let Expr::StringLit(k_str) = k_expr {
+                dict_pairs.push((k_str, v_expr));
             } else {
                 return Err(nom::Err::Failure(Error::new(input, ErrorKind::Tag)));
             }
@@ -449,6 +476,14 @@ fn number(input: &str) -> IResult<&str, Expr> {
     let (input, num_str) = recognize_float(input)?;
     let val: f64 = num_str.parse().unwrap();
     Ok((input, Expr::Number(val)))
+}
+
+fn string_lit(input: &str) -> IResult<&str, Expr> {
+    // シングルクォートで囲まれた文字列を単純にパース
+    let (input, _) = char('\'')(input)?;
+    let (input, s) = take_while1(|c: char| c != '\'')(input)?;
+    let (input, _) = char('\'')(input)?;
+    Ok((input, Expr::StringLit(s.to_string())))
 }
 
 fn recognize_float(input: &str) -> IResult<&str, String> {

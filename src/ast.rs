@@ -4,6 +4,7 @@ use std::fmt;
 pub enum Expr {
     Number(f64),
     Var(String),
+    StringLit(String),
     BinaryOp {
         op: BinOp,
         left: Box<Expr>,
@@ -30,6 +31,10 @@ pub enum Expr {
         var: String,
         iter: Box<Expr>,
         cond: Option<Box<Expr>>,
+    },
+    Index {
+        expr: Box<Expr>,
+        index: Box<Expr>,
     },
 }
 

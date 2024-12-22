@@ -1,3 +1,5 @@
+// src/parser.rs
+
 use crate::ast::{BinOp, Expr};
 use nom::error::Error;
 use nom::error::ErrorKind;
@@ -5,7 +7,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0},
-    combinator::opt,
+    combinator::{opt, recognize},
     multi::separated_list0,
     sequence::{delimited, pair, preceded},
     IResult,
@@ -25,11 +27,17 @@ use nom::{
 /// primary := number | string_lit | identifier | lambda_expr | parenthesized_or_tuple | list_literal | dict_or_set
 ///    (さらに後ろに [expr] → index_access や (args) → call_expr が続く可能性)
 ///
-/// list_literal := "[" (  (expr ("," expr)*)?  or  (expr "for" identifier "in" expr (if expr)? )  )  "]"
-/// dict_or_set := "{" ... "}"
+/// list_literal := "[" ... "]" (list or list comprehension)
+/// dict_or_set := "{" ... "}" (normal dict/set or dict comprehension)
+///
+/// dict_comprehension := "{" key_expr ":" value_expr "for" identifier "in" expr ( "if" expr )? "}"
+/// list_comprehension := "[" elem_expr "for" identifier "in" expr ( "if" expr )? "]"
 ///
 /// ※ 簡略版のため、実際のPython文法とは異なる部分があります
 
+//---------------------------------------------------------
+// パブリックなエントリポイント: parse_expr
+//---------------------------------------------------------
 pub fn parse_expr(input: &str) -> Result<Expr, String> {
     let input = input.trim();
     let (rest, expr) = top_level_expr(input).map_err(|e| format!("Parse error: {:?}", e))?;
@@ -40,6 +48,9 @@ pub fn parse_expr(input: &str) -> Result<Expr, String> {
     }
 }
 
+//---------------------------------------------------------
+// トップレベル: assignment / lambda / conditional_expr
+//---------------------------------------------------------
 fn top_level_expr(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
     assignment(input)
@@ -76,6 +87,9 @@ fn expr_wrapper(input: &str) -> IResult<&str, Expr> {
     assignment(input)
 }
 
+//---------------------------------------------------------
+// lambda_expr: "lambda <param> : <body>"
+//---------------------------------------------------------
 fn lambda_expr(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
     let (input, _) = tag("lambda")(input)?;
@@ -94,10 +108,12 @@ fn lambda_expr(input: &str) -> IResult<&str, Expr> {
     ))
 }
 
+//---------------------------------------------------------
+// 三項演算子 (cond_expr if condition else cond_expr)
+//---------------------------------------------------------
 fn conditional_expr(input: &str) -> IResult<&str, Expr> {
     let (input, if_true_expr) = comparison(input)?;
 
-    // "if" ... "else" ... があれば三項演算子
     let (input, maybe_if) = opt(preceded(multispace0, tag("if")))(input)?;
     if maybe_if.is_none() {
         return Ok((input, if_true_expr));
@@ -119,7 +135,9 @@ fn conditional_expr(input: &str) -> IResult<&str, Expr> {
     ))
 }
 
+//---------------------------------------------------------
 // comparison: additive ( (">=" | ">" | "==" | "!=" | "<=" | "<") additive )*
+//---------------------------------------------------------
 fn comparison(input: &str) -> IResult<&str, Expr> {
     let (input, mut expr) = additive(input)?;
     let (mut input, _) = multispace0(input)?;
@@ -161,7 +179,9 @@ fn comparison(input: &str) -> IResult<&str, Expr> {
     Ok((input, expr))
 }
 
-// additive: multiplicative (("+" | "-") multiplicative)*
+//---------------------------------------------------------
+// additive: multiplicative ( ("+"|"-") multiplicative )*
+//---------------------------------------------------------
 fn additive(input: &str) -> IResult<&str, Expr> {
     let (input, mut expr) = multiplicative(input)?;
     let (mut input, _) = multispace0(input)?;
@@ -190,7 +210,9 @@ fn additive(input: &str) -> IResult<&str, Expr> {
     Ok((input, expr))
 }
 
-// multiplicative: exponentiation (("*" | "/" | "%") exponentiation)*
+//---------------------------------------------------------
+// multiplicative: exponentiation ( ("*"|"/"|"%") exponentiation )*
+//---------------------------------------------------------
 fn multiplicative(input: &str) -> IResult<&str, Expr> {
     let (input, mut expr) = exponentiation(input)?;
     let (mut input, _) = multispace0(input)?;
@@ -220,7 +242,9 @@ fn multiplicative(input: &str) -> IResult<&str, Expr> {
     Ok((input, expr))
 }
 
+//---------------------------------------------------------
 // exponentiation: primary ("**" exponentiation)? (右結合)
+//---------------------------------------------------------
 fn exponentiation(input: &str) -> IResult<&str, Expr> {
     let (input, base_expr) = primary(input)?;
     let (input, _) = multispace0(input)?;
@@ -242,7 +266,9 @@ fn exponentiation(input: &str) -> IResult<&str, Expr> {
     }
 }
 
+//---------------------------------------------------------
 // primary: number | string_lit | paren/tuple | list_literal | dict_or_set | call_or_var
+//---------------------------------------------------------
 fn primary(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
     let (input, expr) = alt((
@@ -253,11 +279,12 @@ fn primary(input: &str) -> IResult<&str, Expr> {
         string_lit,
         call_or_var,
     ))(input)?;
-    // index / slice / etc...
     index_access(input, expr)
 }
 
+//---------------------------------------------------------
 // index_access: expr[...] の連鎖
+//---------------------------------------------------------
 fn index_access(input: &str, expr: Expr) -> IResult<&str, Expr> {
     let mut current_expr = expr;
     let (mut input, _) = multispace0(input)?;
@@ -278,26 +305,25 @@ fn index_access(input: &str, expr: Expr) -> IResult<&str, Expr> {
     Ok((input, current_expr))
 }
 
-// list_literal: "[" ... "]"
-//   - 空リスト []
-//   - [ expr ("," expr)* ]
-//   - [ <elem_expr> for <var> in <iter_expr> if <cond>? ]
+//---------------------------------------------------------
+// list_literal: "[" (list or list comprehension) "]"
+//---------------------------------------------------------
 fn list_literal(input: &str) -> IResult<&str, Expr> {
-    // "["
     let (input, _) = preceded(multispace0, char('['))(input)?;
-    let (input, _) = multispace0(input)?;
+    let (mut input, _) = multispace0(input)?;
 
+    // 空リスト
     if let Ok((input2, _)) =
         preceded(multispace0::<&str, nom::error::Error<&str>>, char(']'))(input)
     {
         return Ok((input2, Expr::List(vec![])));
     }
 
-    // まず1つ目の要素(または要素式)をパース
+    // 1つ目の要素式
     let (input_expr, first_expr) = expr_wrapper(input)?;
-    let (input_expr, _) = multispace0(input_expr)?;
+    let (mut input_expr, _) = multispace0(input_expr)?;
 
-    // "for" があれば内包表記
+    // "for" なら内包表記
     if let Ok((input_for, _)) =
         preceded(multispace0::<&str, nom::error::Error<&str>>, tag("for"))(input_expr)
     {
@@ -308,9 +334,7 @@ fn list_literal(input: &str) -> IResult<&str, Expr> {
 }
 
 //---------------------------------------------------------
-// 内包表記: [ <elem_expr> for <var> in <iter_expr> (if <cond_expr>)? ]
-//   ただし <iter_expr> が三項演算子とフィルタ if で衝突する場合があるため
-//   バックトラックを使う
+// parse_list_comprehension: [ elem_expr for var in iter if cond? ]
 //---------------------------------------------------------
 fn parse_list_comprehension(input: &str, elem_expr: Expr) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
@@ -318,25 +342,21 @@ fn parse_list_comprehension(input: &str, elem_expr: Expr) -> IResult<&str, Expr>
     let (input, _) = multispace0(input)?;
     let (input, _) = tag("in")(input)?;
     let (input, _) = multispace0(input)?;
-    let (mut input, (iter_expr, filter_if_taken)) = parse_iter_expr_with_backtracking(input)?;
 
-    // filter_if_taken == true の場合、すでに「if」が先に消費されている
-    // filter_if_taken == false の場合は、これから if があるかチェック
-    let (input, cond_expr) = if filter_if_taken {
-        (input, None)
-    } else {
+    let (input, (iter_expr, _filter_if_taken)) = parse_iter_expr_with_backtracking(input)?;
+    let (mut input, cond_expr) = {
         let mut cexpr = None;
         if let Ok((input_if, _)) =
             preceded(multispace0::<&str, nom::error::Error<&str>>, tag("if"))(input)
         {
             let (input_if, condition) = expr_wrapper(input_if)?;
             cexpr = Some(Box::new(condition));
-            input = input_if;
+            (input_if, cexpr)
+        } else {
+            (input, None)
         }
-        (input, cexpr)
     };
 
-    // "]"
     let (input, _) = multispace0(input)?;
     let (input, _) = char(']')(input)?;
 
@@ -351,34 +371,24 @@ fn parse_list_comprehension(input: &str, elem_expr: Expr) -> IResult<&str, Expr>
     ))
 }
 
-fn parse_iter_expr_with_backtracking(input: &str) -> IResult<&str, (Expr, bool)> {
-    let parse_result = expr_wrapper(input);
-    if parse_result.is_ok() {
-        // そのまま成功
-        let (rest, expr) = parse_result.unwrap();
-        return Ok((rest, (expr, false)));
-    }
-
-    let (rest, fallback_expr) = alt((number, string_lit, var_expr))(input)?;
-
-    Ok((rest, (fallback_expr, false)))
-}
-
+//---------------------------------------------------------
+// parse_normal_list: [ expr, expr, ... ]
+//---------------------------------------------------------
 fn parse_normal_list(mut input: &str, first_expr: Expr) -> IResult<&str, Expr> {
     let mut elems = vec![first_expr];
 
     loop {
-        // カンマがあるか
-        let (input2, opt_comma) = opt(preceded(multispace0, char(',')))(input)?;
+        let (input2, opt_comma) = opt(preceded(
+            multispace0::<&str, nom::error::Error<&str>>,
+            char(','),
+        ))(input)?;
         if opt_comma.is_some() {
             let (input2, _) = multispace0(input2)?;
-            // 次の要素をパース
             if let Ok((input2, next_expr)) = expr_wrapper(input2) {
                 elems.push(next_expr);
                 input = input2;
                 continue;
             } else {
-                // カンマ後に式が無ければ末尾カンマ扱いで終了
                 input = input2;
                 break;
             }
@@ -393,51 +403,177 @@ fn parse_normal_list(mut input: &str, first_expr: Expr) -> IResult<&str, Expr> {
     Ok((input, Expr::List(elems)))
 }
 
+//---------------------------------------------------------
+// dict_or_set: "{" ... "}"
+//   1) 空なら => Dict(vec![])
+//   2) 最初の要素が "key_expr : value_expr" なら => さらに "for" があれば dict comprehension
+//   3) なければ => 通常のdict/set (既存ロジック)
+//---------------------------------------------------------
 fn dict_or_set(input: &str) -> IResult<&str, Expr> {
-    let (input, pairs) = delimited(
-        preceded(multispace0, char('{')),
-        opt(separated_list0(
-            preceded(multispace0, char(',')),
-            parse_dict_item_or_expr,
-        )),
-        preceded(multispace0, char('}')),
-    )(input)?;
+    let (input, _) = preceded(multispace0, char('{'))(input)?;
+    let (mut input, _) = multispace0(input)?;
 
-    let items = pairs.unwrap_or_else(|| vec![]);
-    if items.is_empty() {
-        // {} は空dictとする
-        return Ok((input, Expr::Dict(vec![])));
+    // 空
+    if let Ok((rest, _)) = preceded(multispace0::<&str, nom::error::Error<&str>>, char('}'))(input)
+    {
+        return Ok((rest, Expr::Dict(vec![])));
     }
 
-    let is_dict = items.iter().any(|(_, v)| v.is_some());
-    if is_dict {
-        // dict
-        let mut dict_pairs = vec![];
-        for (k_expr, v_opt) in items {
-            let v_expr =
-                v_opt.ok_or_else(|| nom::Err::Failure(Error::new(input, ErrorKind::Tag)))?;
-            match k_expr {
-                Expr::Var(k_str) => dict_pairs.push((k_str, v_expr)),
-                Expr::StringLit(k_str) => dict_pairs.push((k_str, v_expr)),
-                _ => {
-                    return Err(nom::Err::Failure(Error::new(input, ErrorKind::Tag)));
-                }
-            }
+    // まず "key_expr : value_expr" を試し、 そのあと "for" があれば dict comprehension
+    // バックトラックなしでも大丈夫ですが、必要に応じて実装可能
+
+    // key_expr
+    let (input_key, key_expr) = expr_wrapper(input)?;
+    let (input_key, _) = multispace0(input_key)?;
+    let (input_key, colon_char) = opt(char(':'))(input_key)?;
+
+    if colon_char.is_some() {
+        // value_expr
+        let (input_val, _) = multispace0(input_key)?;
+        let (input_val, value_expr) = expr_wrapper(input_val)?;
+        let (input_val, _) = multispace0(input_val)?;
+
+        // "for" なら dict comprehension
+        if let Ok((input_for, _)) =
+            preceded(multispace0::<&str, nom::error::Error<&str>>, tag("for"))(input_val)
+        {
+            return parse_dict_comprehension(input_for, key_expr, value_expr);
+        } else {
+            // 通常の dict の最初のペアとして扱い、残りを parse_normal_dict
+            return parse_normal_dict(input_val, key_expr, value_expr);
         }
-        Ok((input, Expr::Dict(dict_pairs)))
     } else {
-        // set
-        let mut set_exprs = vec![];
-        for (expr, none_val) in items {
-            if none_val.is_some() {
-                return Err(nom::Err::Failure(Error::new(input, ErrorKind::Tag)));
-            }
-            set_exprs.push(expr);
-        }
-        Ok((input, Expr::Set(set_exprs)))
+        // key_expr のみ => これは set かもしれない
+        // parse_set で処理
+        return parse_normal_set(input_key, key_expr);
     }
 }
 
+//---------------------------------------------------------
+// parse_dict_comprehension: { key_expr : value_expr for var in iter if cond? }
+//   (バックトラックあり)
+//---------------------------------------------------------
+fn parse_dict_comprehension(input: &str, key_expr: Expr, value_expr: Expr) -> IResult<&str, Expr> {
+    let (input, _) = multispace0(input)?;
+    let (input, var_name) = identifier(input)?; // for var
+    let (input, _) = multispace0(input)?;
+    let (input, _) = tag("in")(input)?;
+    let (input, _) = multispace0(input)?;
+
+    // バックトラックでイテレーション対象をパース
+    let (input, (iter_expr, _filter_if_taken)) = parse_iter_expr_with_backtracking(input)?;
+
+    // if cond?
+    let (mut input, cond_expr) = {
+        let mut cexpr = None;
+        if let Ok((input_if, _)) =
+            preceded(multispace0::<&str, nom::error::Error<&str>>, tag("if"))(input)
+        {
+            let (input_if, condition) = expr_wrapper(input_if)?;
+            cexpr = Some(Box::new(condition));
+            (input_if, cexpr)
+        } else {
+            (input, None)
+        }
+    };
+
+    // "}"
+    let (input, _) = multispace0(input)?;
+    let (input, _) = char('}')(input)?;
+
+    // <-- Added a new variant `Expr::DictComp` in AST
+    Ok((
+        input,
+        Expr::DictComp {
+            key_expr: Box::new(key_expr),
+            value_expr: Box::new(value_expr),
+            var: var_name,
+            iter: Box::new(iter_expr),
+            cond: cond_expr,
+        },
+    ))
+}
+
+//---------------------------------------------------------
+// parse_normal_dict: "key_expr : value_expr" のペアを最初に1つ受け取ったあと、
+//   カンマ区切りで後続のペアを parse_dict_item_or_expr として収集
+//---------------------------------------------------------
+fn parse_normal_dict(mut input: &str, first_key: Expr, first_val: Expr) -> IResult<&str, Expr> {
+    // すでに最初のペアは確定
+    let mut pairs = vec![(expr_to_dict_key(first_key)?, first_val)];
+
+    loop {
+        // カンマチェック
+        let (input2, opt_comma) = opt(preceded(multispace0, char(',')))(input)?;
+        if opt_comma.is_some() {
+            // parse next "key_expr : value_expr" or nothing
+            let (input2, _) = multispace0(input2)?;
+            // 次が '}' なら末尾カンマ
+            if let Ok((rest, _)) =
+                preceded(multispace0::<&str, nom::error::Error<&str>>, char('}'))(input2)
+            {
+                return Ok((rest, Expr::Dict(pairs)));
+            }
+            // それ以外は parse_dict_item_or_expr
+            let (input2, (k_expr, v_opt)) = parse_dict_item_or_expr(input2)?;
+            let v_expr =
+                v_opt.ok_or_else(|| nom::Err::Failure(Error::new(input2, ErrorKind::Tag)))?;
+            pairs.push((expr_to_dict_key(k_expr)?, v_expr));
+            input = input2;
+        } else {
+            // カンマが無い => 次は '}' のはず
+            input = input2;
+            break;
+        }
+    }
+
+    // 最後に "}" を読む
+    let (input, _) = multispace0(input)?;
+    let (input, _) = char('}')(input)?;
+
+    Ok((input, Expr::Dict(pairs)))
+}
+
+//---------------------------------------------------------
+// parse_normal_set: set は { expr, expr, ... }
+//   すでに1つ目の expr を受け取っているので、カンマ続きで要素を収集
+//---------------------------------------------------------
+fn parse_normal_set(mut input: &str, first_expr: Expr) -> IResult<&str, Expr> {
+    let mut set_elems = vec![first_expr];
+
+    loop {
+        let (input2, opt_comma) = opt(preceded(multispace0, char(',')))(input)?;
+        if opt_comma.is_some() {
+            let (input2, _) = multispace0(input2)?;
+            if let Ok((input2, (expr, v_opt))) = parse_dict_item_or_expr(input2) {
+                // set要素なので v_opt があればエラー
+                if v_opt.is_some() {
+                    return Err(nom::Err::Failure(Error::new(input2, ErrorKind::Tag)));
+                }
+                set_elems.push(expr);
+                input = input2;
+                continue;
+            } else {
+                // 末尾カンマ等
+                input = input2;
+                break;
+            }
+        } else {
+            input = input2;
+            break;
+        }
+    }
+
+    let (input, _) = multispace0(input)?;
+    let (input, _) = char('}')(input)?;
+    Ok((input, Expr::Set(set_elems)))
+}
+
+//---------------------------------------------------------
+// parse_dict_item_or_expr:
+//   - dict item: expr ":" expr => (expr, Some(expr))
+//   - otherwise => (expr, None)
+//---------------------------------------------------------
 fn parse_dict_item_or_expr(input: &str) -> IResult<&str, (Expr, Option<Expr>)> {
     let (input, first_expr) = expr_wrapper(input)?;
     let (input, _) = multispace0(input)?;
@@ -452,6 +588,9 @@ fn parse_dict_item_or_expr(input: &str) -> IResult<&str, (Expr, Option<Expr>)> {
     }
 }
 
+//---------------------------------------------------------
+// parenthesized_or_tuple: "(" [ expr ("," expr)* [","] ] ")"
+//---------------------------------------------------------
 fn parenthesized_or_tuple(input: &str) -> IResult<&str, Expr> {
     let (input, exprs) = delimited(
         preceded(multispace0, char('(')),
@@ -464,26 +603,20 @@ fn parenthesized_or_tuple(input: &str) -> IResult<&str, Expr> {
 
     let exprs = exprs.unwrap_or_else(|| vec![]);
     match exprs.len() {
-        0 => {
-            // () は空タプル
-            Ok((input, Expr::Tuple(vec![])))
-        }
-        1 => {
-            // (expr) は単一expr
-            Ok((input, exprs.into_iter().next().unwrap()))
-        }
-        _ => {
-            // 複数 => タプル
-            Ok((input, Expr::Tuple(exprs)))
-        }
+        0 => Ok((input, Expr::Tuple(vec![]))),               // ()
+        1 => Ok((input, exprs.into_iter().next().unwrap())), // (expr)
+        _ => Ok((input, Expr::Tuple(exprs))),                // (a, b, c,...)
     }
 }
 
+//---------------------------------------------------------
+// call_or_var: var_expr / lambda_expr + optional (args)
+//---------------------------------------------------------
 fn call_or_var(input: &str) -> IResult<&str, Expr> {
     let (input, e) = alt((lambda_expr, var_expr))(input)?;
     let (input, _) = multispace0(input)?;
 
-    // 関数呼び出し?
+    // "(" args ")" ?
     let (input, maybe_call) = opt(delimited(
         char('('),
         separated_list0(
@@ -506,17 +639,26 @@ fn call_or_var(input: &str) -> IResult<&str, Expr> {
     }
 }
 
+//---------------------------------------------------------
+// var_expr: identifier => Expr::Var
+//---------------------------------------------------------
 fn var_expr(input: &str) -> IResult<&str, Expr> {
     let (input, var) = identifier(input)?;
     Ok((input, Expr::Var(var)))
 }
 
+//---------------------------------------------------------
+// number: 整数 or 小数
+//---------------------------------------------------------
 fn number(input: &str) -> IResult<&str, Expr> {
     let (input, num_str) = recognize_float(input)?;
     let val: f64 = num_str.parse().unwrap();
     Ok((input, Expr::Number(val)))
 }
 
+//---------------------------------------------------------
+// string_lit: シングルクォート囲み
+//---------------------------------------------------------
 fn string_lit(input: &str) -> IResult<&str, Expr> {
     let (input, _) = char('\'')(input)?;
     let (input, s) = take_while1(|c: char| c != '\'')(input)?;
@@ -524,21 +666,25 @@ fn string_lit(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::StringLit(s.to_string())))
 }
 
+//---------------------------------------------------------
+// recognize_float: 整数 or 小数
+//---------------------------------------------------------
 fn recognize_float(input: &str) -> IResult<&str, String> {
     let (input, integer_part) = take_while1(|c: char| c.is_ascii_digit())(input)?;
     let (input, fractional_part) = opt(preceded(
         char('.'),
         take_while1(|c: char| c.is_ascii_digit()),
     ))(input)?;
-
     if let Some(frac) = fractional_part {
-        let full_num = format!("{}.{}", integer_part, frac);
-        Ok((input, full_num))
+        Ok((input, format!("{}.{}", integer_part, frac)))
     } else {
         Ok((input, integer_part.to_string()))
     }
 }
 
+//---------------------------------------------------------
+// identifier: [a-zA-Z_][a-zA-Z0-9_]*
+//---------------------------------------------------------
 fn identifier(input: &str) -> IResult<&str, String> {
     let (input, first) =
         nom::character::complete::satisfy(|c: char| c.is_alphabetic() || c == '_')(input)?;
@@ -546,4 +692,31 @@ fn identifier(input: &str) -> IResult<&str, String> {
         take_while1::<_, &str, Error<&str>>(|c: char| c.is_alphanumeric() || c == '_')(input)
             .or(Ok((input, "")))?;
     Ok((input, format!("{}{}", first, rest)))
+}
+
+//---------------------------------------------------------
+// バックトラック: イテレーション対象をパース (三項演算子 vs if フィルタ衝突対策)
+//---------------------------------------------------------
+fn parse_iter_expr_with_backtracking(input: &str) -> IResult<&str, (Expr, bool)> {
+    // まず expr_wrapper を試す
+    if let Ok((rest, expr)) = expr_wrapper(input) {
+        // 成功 => それを返す
+        return Ok((rest, (expr, false)));
+    }
+
+    // 失敗 => フォールバック
+    //   例として identifier / number / string の先頭だけをイテレータとみなす
+    let (rest, fallback_expr) = alt((number, string_lit, var_expr))(input)?;
+    Ok((rest, (fallback_expr, false)))
+}
+
+//---------------------------------------------------------
+// ユーティリティ: Expr -> dictキー文字列の取り出し
+//---------------------------------------------------------
+fn expr_to_dict_key(e: Expr) -> Result<String, nom::Err<Error<&'static str>>> {
+    match e {
+        Expr::Var(s) => Ok(s),
+        Expr::StringLit(s) => Ok(s),
+        _ => Err(nom::Err::Failure(Error::new("", ErrorKind::Tag))),
+    }
 }

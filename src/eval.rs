@@ -556,6 +556,62 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
 
             Ok((Value::List(result), env))
         }
+        Expr::DictComp {
+            key_expr,
+            value_expr,
+            var,
+            iter,
+            cond,
+        } => {
+            // iterを評価
+            let (iter_val, env) = eval_expr(*iter, env)?;
+            // iter_valがList, Tuple, Set, Dictなど
+            let items: Vec<Value> = match iter_val {
+                Value::List(v) => v,
+                Value::Tuple(v) => v,
+                Value::Set(v) => v,
+                Value::Dict(m) => {
+                    // DictならキーをVarとしてイテレート or 文字列キーなど
+                    m.into_iter().map(|(k, _)| Value::Var(k)).collect()
+                }
+                _ => return Err(EvalError::TypeError),
+            };
+
+            let mut map = std::collections::HashMap::new();
+            let current_env = env.clone();
+
+            for item in items {
+                // var に item をバインド
+                let mut new_env_data = (*current_env).clone();
+                new_env_data.set(&var, item);
+                let new_env = std::rc::Rc::new(new_env_data);
+
+                // フィルタチェック
+                if let Some(cond_expr) = &cond {
+                    let (cond_val, _) = eval_expr((**cond_expr).clone(), new_env.clone())?;
+                    if !is_truthy(&cond_val) {
+                        continue;
+                    }
+                }
+
+                // key_expr, value_expr を評価
+                let (k_val, _) = eval_expr((*key_expr).clone(), new_env.clone())?;
+                let (v_val, _) = eval_expr((*value_expr).clone(), new_env)?;
+
+                // キーは文字列か変数名か... python風にするなら(例: intキーもOKにしたい?)
+                // ここでは単純に k_val が StringLit or Var ならStringに変換、など
+                let k_str = match k_val {
+                    Value::Var(s) => s,
+                    Value::StringLit(s) => s,
+                    // Numberなら format? エラーにする? => お好み
+                    Value::Number(n) => n.to_string(),
+                    _ => return Err(EvalError::TypeError),
+                };
+
+                map.insert(k_str, v_val);
+            }
+            Ok((Value::Dict(map), env))
+        }
         Expr::Index { expr, index } => {
             let (container_val, env) = eval_expr(*expr, env)?;
             let (index_val, env) = eval_expr(*index, env)?;

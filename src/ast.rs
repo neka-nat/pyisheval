@@ -32,6 +32,13 @@ pub enum Expr {
         iter: Box<Expr>,
         cond: Option<Box<Expr>>,
     },
+    DictComp {
+        key_expr: Box<Expr>,
+        value_expr: Box<Expr>,
+        var: String,
+        iter: Box<Expr>,
+        cond: Option<Box<Expr>>,
+    },
     Index {
         expr: Box<Expr>,
         index: Box<Expr>,

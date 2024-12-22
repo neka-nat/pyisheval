@@ -127,7 +127,7 @@ mod test {
     }
 
     #[test]
-    fn test_splitlines() {
+    fn test_string_method() {
         let mut interp = Interpreter::new();
         assert_eq!(interp.eval("'hello'.upper()").unwrap().to_string(), "HELLO");
         assert_eq!(interp.eval("'Hello'.lower()").unwrap().to_string(), "hello");
@@ -136,5 +136,13 @@ mod test {
             interp.eval("x.splitlines()").unwrap().to_string(),
             "[a, b, c]"
         );
+    }
+
+    #[test]
+    fn test_list_method() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = [1, 2, 3]").unwrap();
+        assert_eq!(interp.eval("x.append(4)").unwrap().to_string(), "[1, 2, 3, 4]");
+        assert_eq!(interp.eval("x.clear()").unwrap().to_string(), "[]");
     }
 }

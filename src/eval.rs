@@ -670,13 +670,17 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
                 arg_vals.push(av);
             }
 
-            // 3) オブジェクトが文字列かどうか
+            // 3) オブジェクトの型ごとにメソッド処理を分岐
             let result = match obj_val {
                 Value::StringLit(s) => {
-                    // メソッド名に応じて処理を分岐
+                    // すでに前回の do_string_method(...) を作っているなら呼び出し
                     do_string_method(&s, &method, &arg_vals)?
                 }
-                // もし他の型に対してもメソッドを定義したければここで分岐
+                Value::List(lst) => {
+                    // 今回新規に追加: リスト用メソッド
+                    do_list_method(&lst, &method, &arg_vals)?
+                }
+                // 他にオブジェクトへメソッドを定義したければ追加
                 _ => {
                     return Err(EvalError::TypeError);
                 }
@@ -1333,6 +1337,249 @@ fn do_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, Eval
         // それ以外のメソッド名
         other => Err(EvalError::UndefinedVar(format!(
             "Unknown string method: {}",
+            other
+        ))),
+    }
+}
+
+fn do_list_method(list: &Vec<Value>, method: &str, args: &[Value]) -> Result<Value, EvalError> {
+    match method {
+        //--------------------------------------------------------------------------------
+        // 1) append(x)
+        //    - 末尾に x を追加して返す
+        "append" => {
+            if args.len() != 1 {
+                return Err(EvalError::ArgError("append".to_string()));
+            }
+            let mut new_list = list.clone(); // 複製してから push
+            new_list.push(args[0].clone());
+            Ok(Value::List(new_list))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 2) clear()
+        //    - 空リストを返す
+        "clear" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("clear".to_string()));
+            }
+            Ok(Value::List(vec![]))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 3) copy()
+        //    - 同じ要素を持つ新たなリストを返す
+        "copy" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("copy".to_string()));
+            }
+            let new_list = list.clone();
+            Ok(Value::List(new_list))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 4) count(x)
+        //    - x と等しい要素の個数を返す (数値で)
+        "count" => {
+            if args.len() != 1 {
+                return Err(EvalError::ArgError("count".to_string()));
+            }
+            let target = &args[0];
+            let c = list.iter().filter(|v| *v == target).count();
+            Ok(Value::Number(c as f64))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 5) extend(iterable)
+        //    - 引数がリストならその要素を末尾に追加して返す
+        "extend" => {
+            if args.len() != 1 {
+                return Err(EvalError::ArgError("extend".to_string()));
+            }
+            // extend する対象をリスト(あるいはタプル/セット等)とみなす
+            let mut new_list = list.clone();
+            match &args[0] {
+                Value::List(v) => {
+                    new_list.extend(v.clone());
+                }
+                Value::Tuple(v) => {
+                    new_list.extend(v.clone());
+                }
+                Value::Set(v) => {
+                    new_list.extend(v.clone());
+                }
+                _ => {
+                    // 簡易的にエラー
+                    return Err(EvalError::TypeError);
+                }
+            }
+            Ok(Value::List(new_list))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 6) index(x)
+        //    - x と等しい最初の要素のインデックスを返す (無ければエラーにする)
+        "index" => {
+            if args.len() != 1 {
+                return Err(EvalError::ArgError("index".to_string()));
+            }
+            let target = &args[0];
+            if let Some(pos) = list.iter().position(|v| v == target) {
+                Ok(Value::Number(pos as f64))
+            } else {
+                // Python なら ValueError 的なものを投げる
+                Err(EvalError::ArgError("value not in list".to_string()))
+            }
+        }
+
+        //--------------------------------------------------------------------------------
+        // 7) insert(i, x)
+        //    - i番目に x を挿入して返す（ i > list.len() なら末尾扱い ）
+        "insert" => {
+            if args.len() != 2 {
+                return Err(EvalError::ArgError("insert".to_string()));
+            }
+            let i = match &args[0] {
+                Value::Number(n) => *n as isize,
+                _ => return Err(EvalError::TypeError),
+            };
+            let x = &args[1];
+            let mut new_list = list.clone();
+
+            // Python では負数指定もあるが、ここでは簡易的に 0 未満なら 0、上回れば末尾にする
+            let mut idx = if i < 0 { 0 } else { i as usize };
+            if idx > new_list.len() {
+                idx = new_list.len();
+            }
+
+            new_list.insert(idx, x.clone());
+            Ok(Value::List(new_list))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 8) pop([i])
+        //    - i を指定しなければ末尾を pop して、その popped item を返す
+        //    - i が範囲外ならエラー
+        "pop" => {
+            let mut new_list = list.clone();
+            if new_list.is_empty() {
+                return Err(EvalError::ArgError("pop from empty list".to_string()));
+            }
+
+            // 引数があれば i、無ければ -1 (末尾)
+            let idx = if args.is_empty() {
+                (new_list.len() - 1) as isize
+            } else if args.len() == 1 {
+                match &args[0] {
+                    Value::Number(n) => *n as isize,
+                    _ => return Err(EvalError::TypeError),
+                }
+            } else {
+                return Err(EvalError::ArgError("pop".to_string()));
+            };
+
+            // 負数に対応するなら Python 的に末尾から数えるが、ここでは簡易実装
+            if idx < 0 {
+                // -1 以外の負数は未対応 (必要なら対応する)
+                if idx != -1 {
+                    return Err(EvalError::TypeError);
+                }
+                // -1 => 末尾
+                let popped = new_list.pop().unwrap();
+                Ok(popped)
+            } else {
+                let i = idx as usize;
+                if i >= new_list.len() {
+                    return Err(EvalError::ArgError("pop index out of range".to_string()));
+                }
+                let popped = new_list.remove(i);
+                Ok(popped)
+            }
+        }
+
+        //--------------------------------------------------------------------------------
+        // 9) remove(x)
+        //    - x と等しい最初の要素を削除して返す（見つからなければエラー）
+        "remove" => {
+            if args.len() != 1 {
+                return Err(EvalError::ArgError("remove".to_string()));
+            }
+            let target = &args[0];
+            let mut new_list = list.clone();
+            if let Some(pos) = new_list.iter().position(|v| v == target) {
+                new_list.remove(pos);
+                Ok(Value::List(new_list))
+            } else {
+                Err(EvalError::ArgError("value not in list".to_string()))
+            }
+        }
+
+        //--------------------------------------------------------------------------------
+        // 10) reverse()
+        //     - リストを逆順にして返す
+        "reverse" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("reverse".to_string()));
+            }
+            let mut new_list = list.clone();
+            new_list.reverse();
+            Ok(Value::List(new_list))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 11) sort()
+        //     - リストをソートして返す
+        //       (要素が全て数値 or 全て文字列のときだけ対応。それ以外はエラー)
+        "sort" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("sort".to_string()));
+            }
+            // まず型を確認
+            if list.is_empty() {
+                // 空ならそのまま返す
+                return Ok(Value::List(vec![]));
+            }
+
+            let all_numbers = list.iter().all(|v| matches!(v, Value::Number(_)));
+            let all_strings = list.iter().all(|v| matches!(v, Value::StringLit(_)));
+
+            if !all_numbers && !all_strings {
+                return Err(EvalError::TypeError);
+            }
+
+            let mut new_list = list.clone();
+            if all_numbers {
+                // 数値としてソート
+                new_list.sort_by(|a, b| {
+                    let na = match a {
+                        Value::Number(x) => x,
+                        _ => &0.0, // ここには来ない想定
+                    };
+                    let nb = match b {
+                        Value::Number(x) => x,
+                        _ => &0.0,
+                    };
+                    na.partial_cmp(nb).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            } else {
+                // 文字列としてソート
+                new_list.sort_by(|a, b| {
+                    let sa = match a {
+                        Value::StringLit(x) => x,
+                        _ => "",
+                    };
+                    let sb = match b {
+                        Value::StringLit(x) => x,
+                        _ => "",
+                    };
+                    sa.cmp(sb)
+                });
+            }
+            Ok(Value::List(new_list))
+        }
+        // その他
+        other => Err(EvalError::UndefinedVar(format!(
+            "Unknown list method: {}",
             other
         ))),
     }

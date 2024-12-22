@@ -11,6 +11,7 @@ It's not a full Python interpreter, but it supports a subset of Python-like synt
 - List comprehensions: `[y * 2 for y in x]`
 - Conditional expressions: `x if x > 5 else 0`
 - String method: `str.upper()`, `str.lower()`, `str.splitlines()`, etc.
+- List method: `list.append()`, `list.clear()`, etc.
 
 No classes, functions (def), or control structures are supported.
 
@@ -52,6 +53,15 @@ fn main() {
     // Dict comprehension
     let val = interp.eval("{y: y * 2 for y in x}").unwrap();
     println!("{}", val); // {1: 2, 2: 4, 3: 6, 4: 8, 5: 10}
+
+    // String method
+    let val = interp.eval("'hello'.upper()").unwrap();
+    println!("{}", val); // HELLO
+
+    // List method
+    interp.eval("x = [1, 2, 3]").unwrap();
+    let val = interp.eval("x.append(4)").unwrap();
+    println!("{}", val); // [1, 2, 3, 4]
 }
 ```
 

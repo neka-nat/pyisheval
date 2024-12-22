@@ -142,7 +142,7 @@ fn builtin_sum_value(args: &[Value]) -> Result<Value, EvalError> {
     }
 
     match &args[0] {
-        Value::List(v) | Value::Tuple(v) | Value::Set(v) => {
+        Value::List(_v) | Value::Tuple(_v) | Value::Set(_v) => {
             let items = match &args[0] {
                 Value::List(list) => list,
                 Value::Tuple(tup) => tup,
@@ -581,6 +581,18 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                 _ => return Err(EvalError::TypeError),
             };
             Ok((val, env))
+        }
+        Expr::IfExpr {
+            condition,
+            if_true,
+            if_false,
+        } => {
+            let (cond_val, env) = eval_expr(*condition, env)?;
+            if is_truthy(&cond_val) {
+                eval_expr(*if_true, env)
+            } else {
+                eval_expr(*if_false, env)
+            }
         }
     }
 }

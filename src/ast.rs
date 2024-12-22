@@ -36,6 +36,11 @@ pub enum Expr {
         expr: Box<Expr>,
         index: Box<Expr>,
     },
+    IfExpr {
+        condition: Box<Expr>,
+        if_true: Box<Expr>,
+        if_false: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

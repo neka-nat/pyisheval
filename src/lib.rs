@@ -100,4 +100,29 @@ mod test {
             "[6, 8, 10]"
         );
     }
+
+    #[test]
+    fn test_dict_comp() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = [1, 2, 3, 4, 5]").unwrap();
+        assert_eq!(
+            interp.eval("{y: y * 2 for y in x}").unwrap().to_string(),
+            "{1: 2, 2: 4, 3: 6, 4: 8, 5: 10}"
+        );
+    }
+
+    #[test]
+    fn test_if_expr() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = 10").unwrap();
+        assert_eq!(interp.eval("x if x > 5 else 0").unwrap().to_string(), "10");
+        interp.eval("y = 20").unwrap();
+        assert_eq!(
+            interp
+                .eval("'big' if x > y else 'small'")
+                .unwrap()
+                .to_string(),
+            "small"
+        );
+    }
 }

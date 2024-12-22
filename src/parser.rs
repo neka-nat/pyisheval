@@ -7,7 +7,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0},
-    combinator::{opt, recognize},
+    combinator::opt,
     multi::separated_list0,
     sequence::{delimited, pair, preceded},
     IResult,
@@ -310,7 +310,7 @@ fn index_access(input: &str, expr: Expr) -> IResult<&str, Expr> {
 //---------------------------------------------------------
 fn list_literal(input: &str) -> IResult<&str, Expr> {
     let (input, _) = preceded(multispace0, char('['))(input)?;
-    let (mut input, _) = multispace0(input)?;
+    let (input, _) = multispace0(input)?;
 
     // 空リスト
     if let Ok((input2, _)) =
@@ -321,7 +321,7 @@ fn list_literal(input: &str) -> IResult<&str, Expr> {
 
     // 1つ目の要素式
     let (input_expr, first_expr) = expr_wrapper(input)?;
-    let (mut input_expr, _) = multispace0(input_expr)?;
+    let (input_expr, _) = multispace0(input_expr)?;
 
     // "for" なら内包表記
     if let Ok((input_for, _)) =
@@ -344,7 +344,7 @@ fn parse_list_comprehension(input: &str, elem_expr: Expr) -> IResult<&str, Expr>
     let (input, _) = multispace0(input)?;
 
     let (input, (iter_expr, _filter_if_taken)) = parse_iter_expr_with_backtracking(input)?;
-    let (mut input, cond_expr) = {
+    let (input, cond_expr) = {
         let mut cexpr = None;
         if let Ok((input_if, _)) =
             preceded(multispace0::<&str, nom::error::Error<&str>>, tag("if"))(input)
@@ -411,7 +411,7 @@ fn parse_normal_list(mut input: &str, first_expr: Expr) -> IResult<&str, Expr> {
 //---------------------------------------------------------
 fn dict_or_set(input: &str) -> IResult<&str, Expr> {
     let (input, _) = preceded(multispace0, char('{'))(input)?;
-    let (mut input, _) = multispace0(input)?;
+    let (input, _) = multispace0(input)?;
 
     // 空
     if let Ok((rest, _)) = preceded(multispace0::<&str, nom::error::Error<&str>>, char('}'))(input)
@@ -464,7 +464,7 @@ fn parse_dict_comprehension(input: &str, key_expr: Expr, value_expr: Expr) -> IR
     let (input, (iter_expr, _filter_if_taken)) = parse_iter_expr_with_backtracking(input)?;
 
     // if cond?
-    let (mut input, cond_expr) = {
+    let (input, cond_expr) = {
         let mut cexpr = None;
         if let Ok((input_if, _)) =
             preceded(multispace0::<&str, nom::error::Error<&str>>, tag("if"))(input)

@@ -64,6 +64,14 @@ mod test {
         let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3]").unwrap();
         assert_eq!(interp.eval("len(x)").unwrap().to_string(), "3");
+        assert_eq!(interp.eval("len('abc')").unwrap().to_string(), "3");
+    }
+
+    #[test]
+    fn test_builtin_sum_value() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = [1, 2, 3]").unwrap();
+        assert_eq!(interp.eval("sum(x)").unwrap().to_string(), "6");
     }
 
     #[test]

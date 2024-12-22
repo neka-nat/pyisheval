@@ -127,10 +127,41 @@ fn builtin_len_value(args: &[Value]) -> Result<Value, EvalError> {
     }
 
     match &args[0] {
+        Value::StringLit(s) => Ok(Value::Number(s.len() as f64)),
         Value::List(v) => Ok(Value::Number(v.len() as f64)),
         Value::Tuple(v) => Ok(Value::Number(v.len() as f64)),
         Value::Set(v) => Ok(Value::Number(v.len() as f64)),
         Value::Dict(m) => Ok(Value::Number(m.len() as f64)),
+        _ => Err(EvalError::TypeError),
+    }
+}
+
+fn builtin_sum_value(args: &[Value]) -> Result<Value, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("sum".to_string()));
+    }
+
+    match &args[0] {
+        Value::List(v) | Value::Tuple(v) | Value::Set(v) => {
+            let items = match &args[0] {
+                Value::List(list) => list,
+                Value::Tuple(tup) => tup,
+                Value::Set(st) => st,
+                _ => unreachable!(),
+            };
+            let mut total = 0.0;
+            for elem in items {
+                match elem {
+                    Value::Number(n) => {
+                        total += n;
+                    }
+                    _ => {
+                        return Err(EvalError::TypeError);
+                    }
+                }
+            }
+            Ok(Value::Number(total))
+        }
         _ => Err(EvalError::TypeError),
     }
 }
@@ -238,6 +269,13 @@ impl Interpreter {
             Value::BuiltinValue {
                 name: "len".to_string(),
                 func: builtin_len_value,
+            },
+        );
+        base_env.set(
+            "sum",
+            Value::BuiltinValue {
+                name: "sum".to_string(),
+                func: builtin_sum_value,
             },
         );
 

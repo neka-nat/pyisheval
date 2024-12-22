@@ -1,5 +1,3 @@
-// src/parser.rs
-
 use crate::ast::{BinOp, Expr};
 use nom::error::Error;
 use nom::error::ErrorKind;
@@ -279,7 +277,14 @@ fn primary(input: &str) -> IResult<&str, Expr> {
         string_lit,
         call_or_var,
     ))(input)?;
-    index_access(input, expr)
+
+    // 次に配列アクセス [...]* を繰り返し
+    let (input, expr) = index_access(input, expr)?;
+
+    // さらにメソッド呼び出し .method(...) を繰り返しパース
+    let (input, expr) = method_chain(input, expr)?;
+
+    Ok((input, expr))
 }
 
 //---------------------------------------------------------
@@ -303,6 +308,49 @@ fn index_access(input: &str, expr: Expr) -> IResult<&str, Expr> {
     }
 
     Ok((input, current_expr))
+}
+
+fn method_chain(mut input: &str, mut current: Expr) -> IResult<&str, Expr> {
+    loop {
+        let (input2, _) = multispace0(input)?;
+        // ドットがあるかどうか
+        let (input2, dot_opt) = opt(char('.'))(input2)?;
+        if dot_opt.is_none() {
+            // ドットが無ければループ終了
+            break;
+        }
+        // メソッド名をパース
+        let (input2, _) = multispace0(input2)?;
+        let (input2, method_name) = identifier(input2)?; // 例: replace, upper, etc.
+        let (input2, _) = multispace0(input2)?;
+
+        // "(" args ")" があるかどうか
+        let (input2, maybe_call) = opt(delimited(
+            char('('),
+            separated_list0(
+                preceded(multispace0, char(',')),
+                preceded(multispace0, expr_wrapper),
+            ),
+            char(')'),
+        ))(input2)?;
+
+        if let Some(args) = maybe_call {
+            // メソッド呼び出し
+            current = Expr::MethodCall {
+                object: Box::new(current),
+                method: method_name,
+                args,
+            };
+        } else {
+            // 仮に "obj.property" のような形にしたいなら、また別バリアントが必要
+            // ここでは Pythonっぽい "obj.method(...)" のみ想定するのでエラーにしてもよい
+            return Err(nom::Err::Failure(Error::new(input2, ErrorKind::Tag)));
+        }
+
+        input = input2;
+    }
+
+    Ok((input, current))
 }
 
 //---------------------------------------------------------

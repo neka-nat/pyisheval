@@ -39,6 +39,10 @@ pub enum Value {
     Dict(IndexMap<String, Value>),
     Var(String),
     StringLit(String),
+    BoundMethod {
+        receiver: Box<Value>,
+        method: String,
+    },
 }
 
 impl std::fmt::Display for Value {
@@ -73,6 +77,12 @@ impl std::fmt::Display for Value {
             }
             Value::Var(v) => write!(f, "{}", v),
             Value::StringLit(s) => write!(f, "{}", s),
+            Value::BoundMethod {
+                receiver: _,
+                method,
+            } => {
+                write!(f, "<bound method {}>", method)
+            }
         }
     }
 }
@@ -643,6 +653,37 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
                 eval_expr(*if_false, env)
             }
         }
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            // 1) オブジェクトを評価
+            let (obj_val, env) = eval_expr(*object, env)?;
+
+            // 2) 引数を評価
+            let mut arg_vals = Vec::new();
+            let mut cur_env = env.clone();
+            for a in args {
+                let (av, e2) = eval_expr(a, cur_env)?;
+                cur_env = e2;
+                arg_vals.push(av);
+            }
+
+            // 3) オブジェクトが文字列かどうか
+            let result = match obj_val {
+                Value::StringLit(s) => {
+                    // メソッド名に応じて処理を分岐
+                    do_string_method(&s, &method, &arg_vals)?
+                }
+                // もし他の型に対してもメソッドを定義したければここで分岐
+                _ => {
+                    return Err(EvalError::TypeError);
+                }
+            };
+
+            Ok((result, cur_env))
+        }
     }
 }
 
@@ -679,5 +720,620 @@ fn extract_key(val: &Value) -> Result<String, EvalError> {
         Value::Var(s) => Ok(s.clone()),
         Value::StringLit(s) => Ok(s.clone()),
         _ => Err(EvalError::TypeError),
+    }
+}
+
+fn do_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, EvalError> {
+    match method {
+        // 1) capitalize
+        "capitalize" => {
+            // 最初の文字だけ大文字、それ以外小文字
+            let mut c = s.chars();
+            let capitalized = match c.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+            }
+            .to_lowercase();
+            Ok(Value::StringLit(capitalized))
+        }
+
+        // 2) casefold (ここでは単純に lower() と同じにする)
+        "casefold" => Ok(Value::StringLit(s.to_lowercase())),
+
+        // 3) center
+        //    center(width, fillchar=' ')
+        "center" => {
+            let width = match args.get(0) {
+                Some(Value::Number(n)) => *n as usize,
+                _ => return Err(EvalError::ArgError("center".to_string())),
+            };
+            let fillchar = match args.get(1) {
+                Some(Value::StringLit(ch)) if ch.len() == 1 => ch.chars().next().unwrap(),
+                None => ' ',
+                _ => return Err(EvalError::ArgError("center".to_string())),
+            };
+            if s.len() >= width {
+                Ok(Value::StringLit(s.to_string()))
+            } else {
+                let diff = width - s.len();
+                let left = diff / 2;
+                let right = diff - left;
+                let res = format!(
+                    "{}{}{}",
+                    fillchar.to_string().repeat(left),
+                    s,
+                    fillchar.to_string().repeat(right)
+                );
+                Ok(Value::StringLit(res))
+            }
+        }
+
+        // 4) count(substring)
+        "count" => {
+            let sub = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("count".to_string())),
+            };
+            let cnt = s.matches(sub).count() as f64;
+            Ok(Value::Number(cnt))
+        }
+
+        // 5) encode
+        //   Python だと bytes になるが、ここでは単純に同じ文字列を返すか、
+        //   あるいはバイナリ列を表す別の Value を用意してもよい。
+        "encode" => {
+            // 簡易実装としてはエンコードせず、そのまま返す
+            Ok(Value::StringLit(s.to_string()))
+        }
+
+        // 6) endswith(suffix)
+        "endswith" => {
+            let suffix = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("endswith".to_string())),
+            };
+            let yes = s.ends_with(suffix);
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 7) expandtabs
+        //    Python ではタブ文字を指定幅でスペース展開するが、ここではデフォルト8とする。
+        "expandtabs" => {
+            let tabsize = match args.get(0) {
+                Some(Value::Number(n)) => *n as usize,
+                None => 8,
+                _ => return Err(EvalError::ArgError("expandtabs".to_string())),
+            };
+            let expanded = s.replace('\t', &" ".repeat(tabsize));
+            Ok(Value::StringLit(expanded))
+        }
+
+        // 8) find(substring)
+        //    見つかったらその開始インデックス、なければ -1 を返す (Python 互換風)
+        "find" => {
+            let sub = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("find".to_string())),
+            };
+            if let Some(pos) = s.find(sub) {
+                Ok(Value::Number(pos as f64))
+            } else {
+                Ok(Value::Number(-1.0))
+            }
+        }
+
+        // 9) format
+        //    本来は `"{0} ... {1} ...".format(x,y)` のような高度な機能があるが、
+        //    ここでは簡易実装で、"{}" を引数で置き換える程度にする
+        "format" => {
+            let mut result = s.to_string();
+            // "{}" を順番に args の文字列 (to_string()) に置き換え
+            for val in args {
+                let placeholder = "{}";
+                if let Some(idx) = result.find(placeholder) {
+                    result.replace_range(idx..idx + 2, &val.to_string());
+                }
+            }
+            Ok(Value::StringLit(result))
+        }
+
+        // 10) format_map
+        //     今回は簡易的に同じ扱いにするか、未実装エラーでもOK
+        "format_map" => {
+            // 今回は単純に format と同じ扱いにする
+            do_string_method(s, "format", args)
+        }
+
+        // 11) index(substring)
+        //     find と同じだが、見つからなければエラーにするのが Python 流
+        "index" => {
+            let sub = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("index".to_string())),
+            };
+            if let Some(pos) = s.find(sub) {
+                Ok(Value::Number(pos as f64))
+            } else {
+                // Python だと ValueError だが、ここでは EvalError::UndefinedVar などを使うか
+                return Err(EvalError::ArgError("substring not found".to_string()));
+            }
+        }
+
+        // 12) isalnum
+        "isalnum" => {
+            let yes = s.chars().all(|c| c.is_alphanumeric());
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 13) isalpha
+        "isalpha" => {
+            let yes = s.chars().all(|c| c.is_alphabetic());
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 14) isascii
+        "isascii" => {
+            let yes = s.is_ascii();
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 15) isdecimal
+        "isdecimal" => {
+            // Rust の is_ascii_digit() などで近似
+            let yes = s.chars().all(|c| c.is_ascii_digit());
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 16) isdigit
+        "isdigit" => {
+            // 上と同じ程度の簡易判定
+            let yes = s.chars().all(|c| c.is_ascii_digit());
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 17) isidentifier
+        //     Python の厳密なルールは複雑だが、ここでは [a-zA-Z_][a-zA-Z0-9_]* で簡易判定
+        "isidentifier" => {
+            // 空なら false
+            if s.is_empty() {
+                return Ok(Value::Number(0.0));
+            }
+            let mut chars = s.chars();
+            let first = chars.next().unwrap();
+            if !(first.is_alphabetic() || first == '_') {
+                return Ok(Value::Number(0.0));
+            }
+            let yes = chars.all(|c| c.is_alphanumeric() || c == '_');
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 18) islower
+        "islower" => {
+            let yes = !s.is_empty() && s == s.to_lowercase() && s != s.to_uppercase();
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 19) isnumeric
+        //     ここでは isdigit と同じくらいにする
+        "isnumeric" => {
+            let yes = s.chars().all(|c| c.is_ascii_digit());
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 20) isprintable
+        "isprintable" => {
+            let yes = s.chars().all(|c| !c.is_control());
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 21) isspace
+        "isspace" => {
+            let yes = !s.is_empty() && s.chars().all(|c| c.is_whitespace());
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 22) istitle
+        //     Rust には直接の is_titlecase() などがなく、簡易チェックにする
+        "istitle" => {
+            // "Hello World" など一応1単語ごとに先頭大文字か判定する簡易版
+            let yes = s
+                .split_whitespace()
+                .all(|w| w.chars().next().map_or(false, |c| c.is_uppercase()));
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 23) isupper
+        "isupper" => {
+            let yes = !s.is_empty() && s == s.to_uppercase() && s != s.to_lowercase();
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 24) join
+        //     `'sep'.join(list)`
+        "join" => {
+            let list_val = match args.get(0) {
+                Some(v) => v,
+                None => return Err(EvalError::ArgError("join".to_string())),
+            };
+            let joined = match list_val {
+                Value::List(vec) => {
+                    let mut strs = Vec::new();
+                    for item in vec {
+                        strs.push(item.to_string());
+                    }
+                    strs.join(s)
+                }
+                _ => return Err(EvalError::TypeError),
+            };
+            Ok(Value::StringLit(joined))
+        }
+
+        // 25) ljust(width, fillchar=' ')
+        "ljust" => {
+            let width = match args.get(0) {
+                Some(Value::Number(n)) => *n as usize,
+                _ => return Err(EvalError::ArgError("ljust".to_string())),
+            };
+            let fillchar = match args.get(1) {
+                Some(Value::StringLit(ch)) if ch.len() == 1 => ch.chars().next().unwrap(),
+                None => ' ',
+                _ => return Err(EvalError::ArgError("ljust".to_string())),
+            };
+            if s.len() >= width {
+                Ok(Value::StringLit(s.to_string()))
+            } else {
+                let diff = width - s.len();
+                let res = format!("{}{}", s, fillchar.to_string().repeat(diff));
+                Ok(Value::StringLit(res))
+            }
+        }
+
+        // 26) lower
+        "lower" => Ok(Value::StringLit(s.to_lowercase())),
+
+        // 27) lstrip(chars=' ')
+        "lstrip" => {
+            // Python では chars が与えられたらその文字集合を strip するが、
+            // ここではデフォルト空白のみ・あるいは与えられた文字列全部を除去くらいにする
+            let strip_chars = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub.as_str(),
+                None => "\t\r\n ",
+                _ => return Err(EvalError::TypeError),
+            };
+            let trimmed = s.trim_start_matches(|c| strip_chars.contains(c));
+            Ok(Value::StringLit(trimmed.to_string()))
+        }
+
+        // 28) maketrans
+        //     Python では文字 → 文字、または削除文字など複雑。
+        //     ここでは簡易的に dict を返すだけにする or 未実装エラー
+        "maketrans" => {
+            // 本家 Python だと {ord(c1): c2, ...} のようなマッピングを作る
+            // ここでは単に TypeError にするか、空dictを返す例など
+            Ok(Value::Dict(IndexMap::new()))
+        }
+
+        // 29) partition(sep)
+        //     (head, sep, tail) の3要素タプル
+        "partition" => {
+            let sep = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("partition".to_string())),
+            };
+            if let Some(idx) = s.find(sep) {
+                let head = &s[..idx];
+                let tail = &s[idx + sep.len()..];
+                Ok(Value::Tuple(vec![
+                    Value::StringLit(head.to_string()),
+                    Value::StringLit(sep.to_string()),
+                    Value::StringLit(tail.to_string()),
+                ]))
+            } else {
+                Ok(Value::Tuple(vec![
+                    Value::StringLit(s.to_string()),
+                    Value::StringLit("".to_string()),
+                    Value::StringLit("".to_string()),
+                ]))
+            }
+        }
+
+        // 30) removeprefix(prefix)
+        "removeprefix" => {
+            let prefix = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("removeprefix".to_string())),
+            };
+            let res = if s.starts_with(prefix) {
+                &s[prefix.len()..]
+            } else {
+                s
+            };
+            Ok(Value::StringLit(res.to_string()))
+        }
+
+        // 31) removesuffix(suffix)
+        "removesuffix" => {
+            let suffix = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("removesuffix".to_string())),
+            };
+            let res = if s.ends_with(suffix) {
+                &s[..(s.len() - suffix.len())]
+            } else {
+                s
+            };
+            Ok(Value::StringLit(res.to_string()))
+        }
+
+        // 32) replace(old, new, count=∞)
+        "replace" => {
+            let old = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("replace".to_string())),
+            };
+            let new = match args.get(1) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("replace".to_string())),
+            };
+            let count = match args.get(2) {
+                Some(Value::Number(n)) => *n as usize,
+                None => usize::MAX,
+                _ => return Err(EvalError::ArgError("replace".to_string())),
+            };
+            if count == 0 {
+                Ok(Value::StringLit(s.to_string()))
+            } else {
+                // 簡易実装: replace_n 回だけ置換
+                let mut replaced = String::new();
+                let mut remain = s;
+                let mut done = 0;
+                while let Some(pos) = remain.find(old) {
+                    replaced.push_str(&remain[..pos]);
+                    replaced.push_str(new);
+                    remain = &remain[pos + old.len()..];
+                    done += 1;
+                    if done >= count {
+                        break;
+                    }
+                }
+                replaced.push_str(remain);
+                Ok(Value::StringLit(replaced))
+            }
+        }
+
+        // 33) rfind(sub)
+        //     右から検索、見つからなければ -1
+        "rfind" => {
+            let sub = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("rfind".to_string())),
+            };
+            if let Some(pos) = s.rfind(sub) {
+                Ok(Value::Number(pos as f64))
+            } else {
+                Ok(Value::Number(-1.0))
+            }
+        }
+
+        // 34) rindex(sub)
+        //     右から検索、見つからなければエラー
+        "rindex" => {
+            let sub = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("rindex".to_string())),
+            };
+            if let Some(pos) = s.rfind(sub) {
+                Ok(Value::Number(pos as f64))
+            } else {
+                return Err(EvalError::ArgError("substring not found".to_string()));
+            }
+        }
+
+        // 35) rjust(width, fillchar=' ')
+        "rjust" => {
+            let width = match args.get(0) {
+                Some(Value::Number(n)) => *n as usize,
+                _ => return Err(EvalError::ArgError("rjust".to_string())),
+            };
+            let fillchar = match args.get(1) {
+                Some(Value::StringLit(ch)) if ch.len() == 1 => ch.chars().next().unwrap(),
+                None => ' ',
+                _ => return Err(EvalError::ArgError("rjust".to_string())),
+            };
+            if s.len() >= width {
+                Ok(Value::StringLit(s.to_string()))
+            } else {
+                let diff = width - s.len();
+                let res = format!("{}{}", fillchar.to_string().repeat(diff), s);
+                Ok(Value::StringLit(res))
+            }
+        }
+
+        // 36) rpartition(sep)
+        //     (head, sep, tail) の3要素タプル（右から分割）
+        "rpartition" => {
+            let sep = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("rpartition".to_string())),
+            };
+            if let Some(idx) = s.rfind(sep) {
+                let head = &s[..idx];
+                let tail = &s[idx + sep.len()..];
+                Ok(Value::Tuple(vec![
+                    Value::StringLit(head.to_string()),
+                    Value::StringLit(sep.to_string()),
+                    Value::StringLit(tail.to_string()),
+                ]))
+            } else {
+                Ok(Value::Tuple(vec![
+                    Value::StringLit("".to_string()),
+                    Value::StringLit("".to_string()),
+                    Value::StringLit(s.to_string()),
+                ]))
+            }
+        }
+
+        // 37) rsplit(sep=None, maxsplit=-1)
+        //     簡易実装: sep が None なら空白区切り、maxsplit は未考慮
+        "rsplit" => {
+            let sep = match args.get(0) {
+                Some(Value::StringLit(sub)) => {
+                    if sub.is_empty() {
+                        None
+                    } else {
+                        Some(sub.as_str())
+                    }
+                }
+                None => None, // デフォルトは空白区切り
+                _ => return Err(EvalError::ArgError("rsplit".to_string())),
+            };
+            // Python の rsplit と同じように右から分割は面倒なので、ここでは普通の split に
+            let splitted: Vec<&str> = match sep {
+                Some(sepstr) => s.split(sepstr).collect(),
+                None => s.split_whitespace().collect(),
+            };
+            Ok(Value::List(
+                splitted
+                    .into_iter()
+                    .map(|item| Value::StringLit(item.to_string()))
+                    .collect(),
+            ))
+        }
+
+        // 38) rstrip(chars=' ')
+        "rstrip" => {
+            let strip_chars = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub.as_str(),
+                None => "\t\r\n ",
+                _ => return Err(EvalError::TypeError),
+            };
+            let trimmed = s.trim_end_matches(|c| strip_chars.contains(c));
+            Ok(Value::StringLit(trimmed.to_string()))
+        }
+
+        // 39) split(sep=None, maxsplit=-1)
+        //     簡易実装: sep が None なら空白区切り、maxsplit は考慮しない
+        "split" => {
+            let sep = match args.get(0) {
+                Some(Value::StringLit(sub)) => {
+                    if sub.is_empty() {
+                        None
+                    } else {
+                        Some(sub.as_str())
+                    }
+                }
+                None => None, // デフォルトは空白区切り
+                _ => return Err(EvalError::ArgError("split".to_string())),
+            };
+            let splitted: Vec<&str> = match sep {
+                Some(sepstr) => s.split(sepstr).collect(),
+                None => s.split_whitespace().collect(),
+            };
+            Ok(Value::List(
+                splitted
+                    .into_iter()
+                    .map(|item| Value::StringLit(item.to_string()))
+                    .collect(),
+            ))
+        }
+
+        // 40) splitlines()
+        "splitlines" => {
+            // 改行で区切る
+            let lines: Vec<&str> = s.split('\n').collect();
+            Ok(Value::List(
+                lines
+                    .into_iter()
+                    .map(|line| Value::StringLit(line.to_string()))
+                    .collect(),
+            ))
+        }
+
+        // 41) startswith(prefix)
+        "startswith" => {
+            let prefix = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub,
+                _ => return Err(EvalError::ArgError("startswith".to_string())),
+            };
+            let yes = s.starts_with(prefix);
+            Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+        }
+
+        // 42) strip(chars=' ')
+        "strip" => {
+            let strip_chars = match args.get(0) {
+                Some(Value::StringLit(sub)) => sub.as_str(),
+                None => "\t\r\n ",
+                _ => return Err(EvalError::TypeError),
+            };
+            let trimmed = s.trim_matches(|c| strip_chars.contains(c));
+            Ok(Value::StringLit(trimmed.to_string()))
+        }
+
+        // 43) swapcase
+        //     大文字↔小文字 反転
+        "swapcase" => {
+            let swapped: String = s
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_lowercase() {
+                        c.to_ascii_uppercase()
+                    } else if c.is_ascii_uppercase() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            Ok(Value::StringLit(swapped))
+        }
+
+        // 44) title
+        //     本格的には単語境界で先頭大文字、他小文字など。ここでは簡易版で。
+        "title" => {
+            let titled = s
+                .split_whitespace()
+                .map(|w| {
+                    let mut c = w.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            Ok(Value::StringLit(titled))
+        }
+
+        // 45) translate(table)
+        //     Python では maketrans で作った dict を使うが、ここでは未実装/省略でもOK
+        "translate" => {
+            // 省略実装: そのまま返す
+            Ok(Value::StringLit(s.to_string()))
+        }
+
+        // 46) upper
+        "upper" => Ok(Value::StringLit(s.to_uppercase())),
+
+        // 47) zfill(width)
+        "zfill" => {
+            let width = match args.get(0) {
+                Some(Value::Number(n)) => *n as usize,
+                _ => return Err(EvalError::ArgError("zfill".to_string())),
+            };
+            if s.len() >= width {
+                Ok(Value::StringLit(s.to_string()))
+            } else {
+                let diff = width - s.len();
+                let res = format!("{}{}", "0".repeat(diff), s);
+                Ok(Value::StringLit(res))
+            }
+        }
+
+        // それ以外のメソッド名
+        other => Err(EvalError::UndefinedVar(format!(
+            "Unknown string method: {}",
+            other
+        ))),
     }
 }

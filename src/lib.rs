@@ -125,4 +125,14 @@ mod test {
             "small"
         );
     }
+
+    #[test]
+    fn test_splitlines() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = 'a\nb\nc'").unwrap();
+        assert_eq!(
+            interp.eval("x.splitlines()").unwrap().to_string(),
+            "[a, b, c]"
+        );
+    }
 }

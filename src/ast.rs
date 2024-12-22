@@ -48,6 +48,11 @@ pub enum Expr {
         if_true: Box<Expr>,
         if_false: Box<Expr>,
     },
+    MethodCall {
+        object: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

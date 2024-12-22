@@ -27,6 +27,16 @@ mod test {
     }
 
     #[test]
+    fn test_list() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = [1, 2, 3]").unwrap();
+        assert_eq!(
+            interp.eval("x + [4, 5, 6]").unwrap().to_string(),
+            "[1, 2, 3, 4, 5, 6]"
+        );
+    }
+
+    #[test]
     fn test_lambda() {
         let mut interp = Interpreter::new();
         interp.eval("inc = lambda a: a+1").unwrap();

@@ -305,33 +305,108 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
         Expr::BinaryOp { op, left, right } => {
             let (lval, env) = eval_expr(*left, env)?;
             let (rval, env) = eval_expr(*right, env)?;
-            let ln = match lval {
-                Value::Number(n) => n,
-                _ => return Err(EvalError::TypeError),
-            };
-            let rn = match rval {
-                Value::Number(n) => n,
-                _ => return Err(EvalError::TypeError),
-            };
             let val = match op {
-                BinOp::Add => Value::Number(ln + rn),
-                BinOp::Sub => Value::Number(ln - rn),
-                BinOp::Mul => Value::Number(ln * rn),
-                BinOp::Div => {
-                    if rn == 0.0 {
-                        return Err(EvalError::DivisionByZero);
+                BinOp::Add => {
+                    match (lval, rval) {
+                        // 1) 数値 + 数値
+                        (Value::Number(ln), Value::Number(rn)) => Value::Number(ln + rn),
+                        // 2) リスト + リスト
+                        (Value::List(mut lv), Value::List(rv)) => {
+                            lv.extend(rv);
+                            Value::List(lv)
+                        }
+                        // そのほかは TypeError
+                        _ => return Err(EvalError::TypeError),
                     }
-                    Value::Number(ln / rn)
                 }
-                BinOp::FloorDiv => Value::Number(ln.floor() / rn.floor()),
-                BinOp::Mod => Value::Number(ln % rn),
-                BinOp::Exp => Value::Number(ln.powf(rn)),
-                BinOp::Gt => Value::Number(if ln > rn { 1.0 } else { 0.0 }),
-                BinOp::Lt => Value::Number(if ln < rn { 1.0 } else { 0.0 }),
-                BinOp::Ge => Value::Number(if ln >= rn { 1.0 } else { 0.0 }),
-                BinOp::Le => Value::Number(if ln <= rn { 1.0 } else { 0.0 }),
-                BinOp::Eq => Value::Number(if ln == rn { 1.0 } else { 0.0 }),
-                BinOp::Ne => Value::Number(if ln != rn { 1.0 } else { 0.0 }),
+                BinOp::Sub => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Mul => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Div => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        if b == 0.0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        Value::Number(a / b)
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::FloorDiv => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        if b == 0.0 {
+                            return Err(EvalError::DivisionByZero);
+                        }
+                        Value::Number(a.floor() / b.floor())
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Mod => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => Value::Number(a % b),
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Exp => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => Value::Number(a.powf(b)),
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Gt => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Value::Number(if a > b { 1.0 } else { 0.0 })
+                    }
+                    (Value::StringLit(a), Value::StringLit(b)) => {
+                        Value::Number(if a > b { 1.0 } else { 0.0 })
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Lt => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Value::Number(if a < b { 1.0 } else { 0.0 })
+                    }
+                    (Value::StringLit(a), Value::StringLit(b)) => {
+                        Value::Number(if a < b { 1.0 } else { 0.0 })
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Ge => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Value::Number(if a >= b { 1.0 } else { 0.0 })
+                    }
+                    (Value::StringLit(a), Value::StringLit(b)) => {
+                        Value::Number(if a >= b { 1.0 } else { 0.0 })
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Le => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Value::Number(if a <= b { 1.0 } else { 0.0 })
+                    }
+                    (Value::StringLit(a), Value::StringLit(b)) => {
+                        Value::Number(if a <= b { 1.0 } else { 0.0 })
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Eq => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Value::Number(if a == b { 1.0 } else { 0.0 })
+                    }
+                    (Value::StringLit(a), Value::StringLit(b)) => {
+                        Value::Number(if a == b { 1.0 } else { 0.0 })
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
+                BinOp::Ne => match (lval, rval) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Value::Number(if a != b { 1.0 } else { 0.0 })
+                    }
+                    (Value::StringLit(a), Value::StringLit(b)) => {
+                        Value::Number(if a != b { 1.0 } else { 0.0 })
+                    }
+                    _ => return Err(EvalError::TypeError),
+                },
             };
             Ok((val, env))
         }

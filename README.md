@@ -10,6 +10,7 @@ It's not a full Python interpreter, but it supports a subset of Python-like synt
 - List and dictionary literals
 - List comprehensions: `[y * 2 for y in x]`
 - Conditional expressions: `x if x > 5 else 0`
+- String method: `str.upper()`, `str.lower()`, `str.splitlines()`, etc.
 
 No classes, functions (def), or control structures are supported.
 

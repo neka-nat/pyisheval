@@ -129,6 +129,8 @@ mod test {
     #[test]
     fn test_splitlines() {
         let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("'hello'.upper()").unwrap().to_string(), "HELLO");
+        assert_eq!(interp.eval("'Hello'.lower()").unwrap().to_string(), "hello");
         interp.eval("x = 'a\nb\nc'").unwrap();
         assert_eq!(
             interp.eval("x.splitlines()").unwrap().to_string(),

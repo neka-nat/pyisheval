@@ -1,5 +1,6 @@
 use crate::ast::{BinOp, Expr};
 use crate::parser::parse_expr;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::rc::Rc;
 use thiserror::Error;
@@ -35,7 +36,7 @@ pub enum Value {
     List(Vec<Value>),
     Tuple(Vec<Value>),
     Set(Vec<Value>),
-    Dict(HashMap<String, Value>),
+    Dict(IndexMap<String, Value>),
     Var(String),
     StringLit(String),
 }
@@ -65,7 +66,7 @@ impl std::fmt::Display for Value {
             }
             Value::Dict(m) => {
                 let mut pairs = vec![];
-                for (k, val) in m {
+                for (k, val) in m.iter() {
                     pairs.push(format!("{}: {}", k, val));
                 }
                 write!(f, "{{{}}}", pairs.join(", "))
@@ -292,7 +293,7 @@ impl Interpreter {
     }
 }
 
-fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
+pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
     match expr {
         Expr::Number(n) => Ok((Value::Number(n), env)),
         Expr::Var(name) => {
@@ -503,12 +504,11 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
             Ok((Value::Set(vals), cur_env))
         }
         Expr::Dict(pairs) => {
-            let mut map = HashMap::new();
+            let mut map = IndexMap::new();
             let mut cur_env = env;
-            for (k, v) in pairs {
-                // kはStringとしてASTに格納されている想定
-                let (val, e2) = eval_expr(v, cur_env)?;
-                cur_env = e2;
+            for (k, vexpr) in pairs {
+                let (val, env2) = eval_expr(vexpr, cur_env)?;
+                cur_env = env2;
                 map.insert(k, val);
             }
             Ok((Value::Dict(map), cur_env))
@@ -563,30 +563,27 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
             iter,
             cond,
         } => {
-            // iterを評価
             let (iter_val, env) = eval_expr(*iter, env)?;
-            // iter_valがList, Tuple, Set, Dictなど
             let items: Vec<Value> = match iter_val {
                 Value::List(v) => v,
                 Value::Tuple(v) => v,
                 Value::Set(v) => v,
                 Value::Dict(m) => {
-                    // DictならキーをVarとしてイテレート or 文字列キーなど
-                    m.into_iter().map(|(k, _)| Value::Var(k)).collect()
+                    // IndexMap だがValue::Dict(m)ならキーをVarにして
+                    m.into_iter()
+                        .map(|(k, _)| Value::Var(k)) // or StringLit(k)でもよい
+                        .collect()
                 }
                 _ => return Err(EvalError::TypeError),
             };
 
-            let mut map = std::collections::HashMap::new();
+            let mut result_map = IndexMap::new();
             let current_env = env.clone();
-
             for item in items {
-                // var に item をバインド
                 let mut new_env_data = (*current_env).clone();
                 new_env_data.set(&var, item);
-                let new_env = std::rc::Rc::new(new_env_data);
+                let new_env = Rc::new(new_env_data);
 
-                // フィルタチェック
                 if let Some(cond_expr) = &cond {
                     let (cond_val, _) = eval_expr((**cond_expr).clone(), new_env.clone())?;
                     if !is_truthy(&cond_val) {
@@ -594,23 +591,19 @@ fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
                     }
                 }
 
-                // key_expr, value_expr を評価
-                let (k_val, _) = eval_expr((*key_expr).clone(), new_env.clone())?;
-                let (v_val, _) = eval_expr((*value_expr).clone(), new_env)?;
+                let (kval, new_env2) = eval_expr((*key_expr).clone(), new_env.clone())?;
+                let (vval, _) = eval_expr((*value_expr).clone(), new_env2)?;
 
-                // キーは文字列か変数名か... python風にするなら(例: intキーもOKにしたい?)
-                // ここでは単純に k_val が StringLit or Var ならStringに変換、など
-                let k_str = match k_val {
+                let kstr = match kval {
                     Value::Var(s) => s,
                     Value::StringLit(s) => s,
-                    // Numberなら format? エラーにする? => お好み
                     Value::Number(n) => n.to_string(),
                     _ => return Err(EvalError::TypeError),
                 };
 
-                map.insert(k_str, v_val);
+                result_map.insert(kstr, vval);
             }
-            Ok((Value::Dict(map), env))
+            Ok((Value::Dict(result_map), env))
         }
         Expr::Index { expr, index } => {
             let (container_val, env) = eval_expr(*expr, env)?;

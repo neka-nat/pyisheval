@@ -105,23 +105,10 @@ mod test {
     fn test_dict_comp() {
         let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3, 4, 5]").unwrap();
-        let val = interp.eval("{y: y * 2 for y in x}").unwrap();
-        if let Value::Dict(m) = val {
-            let mut pairs: Vec<(&String, &Value)> = m.iter().collect();
-            pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-            assert_eq!(pairs[0].0, "1");
-            assert_eq!(pairs[0].1.to_string(), "2");
-            assert_eq!(pairs[1].0, "2");
-            assert_eq!(pairs[1].1.to_string(), "4");
-            assert_eq!(pairs[2].0, "3");
-            assert_eq!(pairs[2].1.to_string(), "6");
-            assert_eq!(pairs[3].0, "4");
-            assert_eq!(pairs[3].1.to_string(), "8");
-            assert_eq!(pairs[4].0, "5");
-            assert_eq!(pairs[4].1.to_string(), "10");
-        } else {
-            panic!("Not a dict");
-        }
+        assert_eq!(
+            interp.eval("{y: y * 2 for y in x}").unwrap().to_string(),
+            "{1: 2, 2: 4, 3: 6, 4: 8, 5: 10}"
+        );
     }
 
     #[test]

@@ -177,6 +177,278 @@ fn builtin_sum_value(args: &[Value]) -> Result<Value, EvalError> {
     }
 }
 
+/// list(obj) -> 新しいリストを作る
+/// - 0引数なら空リスト [] を返す
+/// - 1引数が文字列なら、各文字を取り出したリストを返す ["h", "e", "l", ...] (簡易)
+/// - 1引数がListなら複製
+/// - 1引数がDictならキーをリストに
+/// - etc...
+fn builtin_list_value(args: &[Value]) -> Result<Value, EvalError> {
+    match args.len() {
+        0 => {
+            // list() -> []
+            Ok(Value::List(vec![]))
+        }
+        1 => {
+            match &args[0] {
+                Value::StringLit(s) => {
+                    // 1文字ずつに分解
+                    let chars = s.chars().map(|c| Value::StringLit(c.to_string())).collect();
+                    Ok(Value::List(chars))
+                }
+                Value::List(lst) => {
+                    // 複製して返す
+                    Ok(Value::List(lst.clone()))
+                }
+                Value::Tuple(tup) => {
+                    Ok(Value::List(tup.clone()))
+                }
+                Value::Set(setv) => {
+                    Ok(Value::List(setv.clone()))
+                }
+                Value::Dict(d) => {
+                    // キー一覧をリストに
+                    let keys = d.keys().map(|k| Value::StringLit(k.clone())).collect();
+                    Ok(Value::List(keys))
+                }
+                // 他の型は適当にエラー or 空リストにするなど
+                _ => Err(EvalError::TypeError),
+            }
+        }
+        _ => Err(EvalError::ArgError("list".to_string())),
+    }
+}
+
+/// dict(obj) -> 新しい辞書を作る
+/// - 0引数なら空のdict {}
+/// - 1引数が既にDictならコピー
+/// - 1引数が[(k,v), (k,v)] のようなリスト/タプルならキーと値を取り出してdict化
+fn builtin_dict_value(args: &[Value]) -> Result<Value, EvalError> {
+    match args.len() {
+        0 => {
+            // dict() -> {}
+            Ok(Value::Dict(IndexMap::new()))
+        }
+        1 => {
+            match &args[0] {
+                Value::Dict(d) => {
+                    // 複製
+                    Ok(Value::Dict(d.clone()))
+                }
+                Value::List(lst) | Value::Tuple(lst) => {
+                    // 各要素がタプル (k, v) であることを期待
+                    let mut new_map = IndexMap::new();
+                    for item in lst {
+                        match item {
+                            Value::Tuple(tv) if tv.len() == 2 => {
+                                let k = tv[0].to_string();  // 簡易: to_string()
+                                let v = tv[1].clone();
+                                new_map.insert(k, v);
+                            }
+                            _ => return Err(EvalError::TypeError),
+                        }
+                    }
+                    Ok(Value::Dict(new_map))
+                }
+                // 他の型をどう解釈するかはアレンジ可能
+                _ => Err(EvalError::TypeError),
+            }
+        }
+        _ => Err(EvalError::ArgError("dict".to_string())),
+    }
+}
+
+/// set(obj) -> 新しいセット(Value::Set)を作る
+/// - 0引数なら空セット
+/// - 1引数がリスト/タプル/文字列なら要素を列挙してセット化
+fn builtin_set_value(args: &[Value]) -> Result<Value, EvalError> {
+    match args.len() {
+        0 => {
+            Ok(Value::Set(vec![]))
+        }
+        1 => {
+            match &args[0] {
+                Value::List(lst) => {
+                    // 重複排除するか、ここでは単にVecに詰める程度
+                    let mut v = lst.clone();
+                    // 簡易的にユニーク化
+                    v.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
+                    v.dedup_by(|a,b| a.to_string() == b.to_string());
+                    Ok(Value::Set(v))
+                }
+                Value::Tuple(tup) => {
+                    let mut v = tup.clone();
+                    v.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
+                    v.dedup_by(|a,b| a.to_string() == b.to_string());
+                    Ok(Value::Set(v))
+                }
+                Value::StringLit(s) => {
+                    // 文字ごとに
+                    let mut chars: Vec<Value> = s.chars().map(|c| Value::StringLit(c.to_string())).collect();
+                    chars.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
+                    chars.dedup_by(|a,b| a.to_string() == b.to_string());
+                    Ok(Value::Set(chars))
+                }
+                // Dict ならキーをセット化 etc... 必要に応じて
+                Value::Dict(d) => {
+                    let mut v: Vec<Value> = d.keys().map(|k| Value::StringLit(k.clone())).collect();
+                    v.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
+                    v.dedup_by(|a,b| a.to_string() == b.to_string());
+                    Ok(Value::Set(v))
+                }
+                _ => Err(EvalError::TypeError),
+            }
+        }
+        _ => Err(EvalError::ArgError("set".to_string())),
+    }
+}
+
+/// zip(*iterables) -> list of tuples
+/// - 最短の iterable の長さで切り詰め
+/// - 例: zip([1,2],[3,4]) => [(1,3), (2,4)]
+fn builtin_zip_value(args: &[Value]) -> Result<Value, EvalError> {
+    if args.is_empty() {
+        // zip() => []
+        return Ok(Value::List(vec![]));
+    }
+    // まず各引数を「リスト(要素列)」に変換
+    let mut lists = Vec::new();
+    for arg in args {
+        match arg {
+            Value::List(lst) => lists.push(lst.clone()),
+            Value::Tuple(tup) => lists.push(tup.clone()),
+            Value::Set(st) => lists.push(st.clone()),
+            Value::StringLit(s) => {
+                // 文字列を char 単位でリスト化
+                let charvals = s.chars().map(|c| Value::StringLit(c.to_string())).collect();
+                lists.push(charvals);
+            }
+            // Dictの場合はキー一覧にする等、適宜実装
+            Value::Dict(d) => {
+                let keys = d.keys().map(|k| Value::StringLit(k.clone())).collect();
+                lists.push(keys);
+            }
+            _ => return Err(EvalError::TypeError),
+        }
+    }
+    // 各リストの長さの min を取る
+    let min_len = lists.iter().map(|v| v.len()).min().unwrap_or(0);
+    // i=0..min_len までループしてタプルを作る
+    let mut result = Vec::new();
+    for i in 0..min_len {
+        let mut elem_tuple = Vec::new();
+        for lst in &lists {
+            elem_tuple.push(lst[i].clone());
+        }
+        result.push(Value::Tuple(elem_tuple));
+    }
+    Ok(Value::List(result))
+}
+
+/// str(obj) -> obj を文字列に変換 (簡易実装)
+/// - 0引数なら空文字列
+/// - 1引数なら to_string()
+fn builtin_str_value(args: &[Value]) -> Result<Value, EvalError> {
+    match args.len() {
+        0 => Ok(Value::StringLit("".to_string())),
+        1 => {
+            // "obj" を to_string() で雑に文字列化
+            Ok(Value::StringLit(args[0].to_string()))
+        }
+        _ => Err(EvalError::ArgError("str".to_string())),
+    }
+}
+
+/// byte(obj) -> Python の bytes に近いもの？
+/// - ここでは簡易的に、文字列を ASCII コードのリストに変換するとか、
+///   あるいは "バイナリ" を表す文字列にして返す等、好きに決めてOK。
+fn builtin_byte_value(args: &[Value]) -> Result<Value, EvalError> {
+    // 例として、引数1つの文字列を ASCII コード(=Number)のリストにする簡易実装
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("byte".to_string()));
+    }
+    match &args[0] {
+        Value::StringLit(s) => {
+            let codes = s.bytes().map(|b| Value::Number(b as f64)).collect();
+            Ok(Value::List(codes))
+        }
+        _ => Err(EvalError::TypeError),
+    }
+}
+
+/// any(iterable) -> 1.0 if any element is truthy, else 0.0
+fn builtin_any_value(args: &[Value]) -> Result<Value, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("any".to_string()));
+    }
+    // iterableを取り出す
+    let list = match &args[0] {
+        Value::List(v) => v.clone(),
+        Value::Tuple(v) => v.clone(),
+        Value::Set(v) => v.clone(),
+        // string を1文字ずつ見たい、dictのキーを見たい等、必要なら追加
+        _ => return Err(EvalError::TypeError),
+    };
+    let yes = list.iter().any(|val| is_truthy(val));
+    Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+}
+
+/// all(iterable) -> 1.0 if all elements are truthy, else 0.0
+fn builtin_all_value(args: &[Value]) -> Result<Value, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("all".to_string()));
+    }
+    // iterableを取り出す
+    let list = match &args[0] {
+        Value::List(v) => v.clone(),
+        Value::Tuple(v) => v.clone(),
+        Value::Set(v) => v.clone(),
+        _ => return Err(EvalError::TypeError),
+    };
+    let yes = list.iter().all(|val| is_truthy(val));
+    Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+}
+
+/// bool(obj) -> 1.0 if truthy, else 0.0
+/// - 0引数なら false(=0.0) とするかは好みで
+fn builtin_bool_value(args: &[Value]) -> Result<Value, EvalError> {
+    if args.len() == 0 {
+        return Ok(Value::Number(0.0));
+    } else if args.len() == 1 {
+        let yes = is_truthy(&args[0]);
+        Ok(Value::Number(if yes { 1.0 } else { 0.0 }))
+    } else {
+        Err(EvalError::ArgError("bool".to_string()))
+    }
+}
+
+/// divmod(a, b) -> (a // b, a % b)
+/// - 両方数値でないとエラー
+/// - Python のように整数同士なら整数除算を想定 (小数が来るとどうするかはお好み)
+fn builtin_divmod_value(args: &[Value]) -> Result<Value, EvalError> {
+    if args.len() != 2 {
+        return Err(EvalError::ArgError("divmod".to_string()));
+    }
+    let a = match &args[0] {
+        Value::Number(n) => *n,
+        _ => return Err(EvalError::TypeError),
+    };
+    let b = match &args[1] {
+        Value::Number(n) => *n,
+        _ => return Err(EvalError::TypeError),
+    };
+    if b == 0.0 {
+        return Err(EvalError::DivisionByZero);
+    }
+
+    // Python 的には int( floor(a / b) ) と remainder
+    // ここでは小数を使っても強引にfloorする例
+    let quot = (a / b).floor();
+    let rem = a - quot * b;
+    let tuple_val = Value::Tuple(vec![Value::Number(quot), Value::Number(rem)]);
+    Ok(tuple_val)
+}
+
 #[derive(Debug, Error)]
 pub enum EvalError {
     #[error("Undefined variable: {0}")]
@@ -287,6 +559,76 @@ impl Interpreter {
             Value::BuiltinValue {
                 name: "sum".to_string(),
                 func: builtin_sum_value,
+            },
+        );
+        base_env.set(
+            "list",
+            Value::BuiltinValue {
+                name: "list".to_string(),
+                func: builtin_list_value,
+            },
+        );
+        base_env.set(
+            "dict",
+            Value::BuiltinValue {
+                name: "dict".to_string(),
+                func: builtin_dict_value,
+            },
+        );
+        base_env.set(
+            "set",
+            Value::BuiltinValue {
+                name: "set".to_string(),
+                func: builtin_set_value,
+            },
+        );
+        base_env.set(
+            "zip",
+            Value::BuiltinValue {
+                name: "zip".to_string(),
+                func: builtin_zip_value,
+            },
+        );
+        base_env.set(
+            "str",
+            Value::BuiltinValue {
+                name: "str".to_string(),
+                func: builtin_str_value,
+            },
+        );
+        base_env.set(
+            "byte",
+            Value::BuiltinValue {
+                name: "byte".to_string(),
+                func: builtin_byte_value,
+            },
+        );
+        base_env.set(
+            "any",
+            Value::BuiltinValue {
+                name: "any".to_string(),
+                func: builtin_any_value,
+            },
+        );
+        base_env.set(
+            "all",
+            Value::BuiltinValue {
+                name: "all".to_string(),
+                func: builtin_all_value,
+            },
+        );
+        base_env.set(
+            "bool",
+            Value::BuiltinValue {
+                name: "bool".to_string(),
+                func: builtin_bool_value,
+            },
+        );
+        base_env.set(
+            "divmod",
+            Value::BuiltinValue {
+                name: "divmod".to_string(),
+                func: builtin_divmod_value,
             },
         );
 
@@ -698,11 +1040,13 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
 fn is_truthy(val: &Value) -> bool {
     match val {
         Value::Number(n) => *n != 0.0,
+        Value::StringLit(s) => !s.is_empty(),
         Value::List(v) => !v.is_empty(),
         Value::Tuple(v) => !v.is_empty(),
         Value::Set(v) => !v.is_empty(),
         Value::Dict(m) => !m.is_empty(),
-        _ => false, // 簡易的に、それ以外はfalse扱い
+        // Lambda や Builtin などの場合の真偽は実装次第
+        _ => true,
     }
 }
 

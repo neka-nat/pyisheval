@@ -70,18 +70,25 @@ mod test {
     }
 
     #[test]
-    fn test_builtin_len_value() {
+    fn test_builtin() {
         let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3]").unwrap();
         assert_eq!(interp.eval("len(x)").unwrap().to_string(), "3");
         assert_eq!(interp.eval("len('abc')").unwrap().to_string(), "3");
-    }
-
-    #[test]
-    fn test_builtin_sum_value() {
-        let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3]").unwrap();
         assert_eq!(interp.eval("sum(x)").unwrap().to_string(), "6");
+        assert_eq!(interp.eval("abs(-10)").unwrap().to_string(), "10");
+        assert_eq!(interp.eval("max(1, 2, 3)").unwrap().to_string(), "3");
+        assert_eq!(interp.eval("min(1, 2, 3)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("int(1.5)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("float(1)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("str(1)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("str(1.5)").unwrap().to_string(), "1.5");
+        assert_eq!(interp.eval("str([1, 2, 3])").unwrap().to_string(), "[1, 2, 3]");
+        assert_eq!(interp.eval("str({'a': 1, 'b': 2})").unwrap().to_string(), "{a: 1, b: 2}");
+        assert_eq!(interp.eval("dict({'a': 1, 'b': 2})").unwrap().to_string(), "{a: 1, b: 2}");
+        assert_eq!(interp.eval("list([1, 2, 3])").unwrap().to_string(), "[1, 2, 3]");
+        assert_eq!(interp.eval("set([1, 2, 3])").unwrap().to_string(), "{1, 2, 3}");
     }
 
     #[test]

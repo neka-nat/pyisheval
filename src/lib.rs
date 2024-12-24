@@ -7,6 +7,7 @@ pub use eval::{EvalError, Interpreter, Value};
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_arithmetic() {
@@ -27,12 +28,26 @@ mod test {
     }
 
     #[test]
+    fn test_eval_with_context() {
+        let interp = Interpreter::new();
+        let context = HashMap::from([("x".to_string(), Value::Number(10.0))]);
+        assert_eq!(
+            interp.eval_with_context("x + 1", &context).unwrap().to_string(),
+            "11"
+        );
+    }
+
+    #[test]
     fn test_list() {
         let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3]").unwrap();
         assert_eq!(
             interp.eval("x + [4, 5, 6]").unwrap().to_string(),
             "[1, 2, 3, 4, 5, 6]"
+        );
+        assert_eq!(
+            interp.eval("x[0] == 1").unwrap().to_string(),
+            "1"
         );
     }
 

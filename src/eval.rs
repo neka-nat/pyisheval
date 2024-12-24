@@ -200,12 +200,8 @@ fn builtin_list_value(args: &[Value]) -> Result<Value, EvalError> {
                     // 複製して返す
                     Ok(Value::List(lst.clone()))
                 }
-                Value::Tuple(tup) => {
-                    Ok(Value::List(tup.clone()))
-                }
-                Value::Set(setv) => {
-                    Ok(Value::List(setv.clone()))
-                }
+                Value::Tuple(tup) => Ok(Value::List(tup.clone())),
+                Value::Set(setv) => Ok(Value::List(setv.clone())),
                 Value::Dict(d) => {
                     // キー一覧をリストに
                     let keys = d.keys().map(|k| Value::StringLit(k.clone())).collect();
@@ -241,7 +237,7 @@ fn builtin_dict_value(args: &[Value]) -> Result<Value, EvalError> {
                     for item in lst {
                         match item {
                             Value::Tuple(tv) if tv.len() == 2 => {
-                                let k = tv[0].to_string();  // 簡易: to_string()
+                                let k = tv[0].to_string(); // 簡易: to_string()
                                 let v = tv[1].clone();
                                 new_map.insert(k, v);
                             }
@@ -263,37 +259,36 @@ fn builtin_dict_value(args: &[Value]) -> Result<Value, EvalError> {
 /// - 1引数がリスト/タプル/文字列なら要素を列挙してセット化
 fn builtin_set_value(args: &[Value]) -> Result<Value, EvalError> {
     match args.len() {
-        0 => {
-            Ok(Value::Set(vec![]))
-        }
+        0 => Ok(Value::Set(vec![])),
         1 => {
             match &args[0] {
                 Value::List(lst) => {
                     // 重複排除するか、ここでは単にVecに詰める程度
                     let mut v = lst.clone();
                     // 簡易的にユニーク化
-                    v.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
-                    v.dedup_by(|a,b| a.to_string() == b.to_string());
+                    v.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+                    v.dedup_by(|a, b| a.to_string() == b.to_string());
                     Ok(Value::Set(v))
                 }
                 Value::Tuple(tup) => {
                     let mut v = tup.clone();
-                    v.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
-                    v.dedup_by(|a,b| a.to_string() == b.to_string());
+                    v.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+                    v.dedup_by(|a, b| a.to_string() == b.to_string());
                     Ok(Value::Set(v))
                 }
                 Value::StringLit(s) => {
                     // 文字ごとに
-                    let mut chars: Vec<Value> = s.chars().map(|c| Value::StringLit(c.to_string())).collect();
-                    chars.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
-                    chars.dedup_by(|a,b| a.to_string() == b.to_string());
+                    let mut chars: Vec<Value> =
+                        s.chars().map(|c| Value::StringLit(c.to_string())).collect();
+                    chars.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+                    chars.dedup_by(|a, b| a.to_string() == b.to_string());
                     Ok(Value::Set(chars))
                 }
                 // Dict ならキーをセット化 etc... 必要に応じて
                 Value::Dict(d) => {
                     let mut v: Vec<Value> = d.keys().map(|k| Value::StringLit(k.clone())).collect();
-                    v.sort_by(|a,b| a.to_string().cmp(&b.to_string()));
-                    v.dedup_by(|a,b| a.to_string() == b.to_string());
+                    v.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+                    v.dedup_by(|a, b| a.to_string() == b.to_string());
                     Ok(Value::Set(v))
                 }
                 _ => Err(EvalError::TypeError),

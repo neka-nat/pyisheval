@@ -84,11 +84,26 @@ mod test {
         assert_eq!(interp.eval("float(1)").unwrap().to_string(), "1");
         assert_eq!(interp.eval("str(1)").unwrap().to_string(), "1");
         assert_eq!(interp.eval("str(1.5)").unwrap().to_string(), "1.5");
-        assert_eq!(interp.eval("str([1, 2, 3])").unwrap().to_string(), "[1, 2, 3]");
-        assert_eq!(interp.eval("str({'a': 1, 'b': 2})").unwrap().to_string(), "{a: 1, b: 2}");
-        assert_eq!(interp.eval("dict({'a': 1, 'b': 2})").unwrap().to_string(), "{a: 1, b: 2}");
-        assert_eq!(interp.eval("list([1, 2, 3])").unwrap().to_string(), "[1, 2, 3]");
-        assert_eq!(interp.eval("set([1, 2, 3])").unwrap().to_string(), "{1, 2, 3}");
+        assert_eq!(
+            interp.eval("str([1, 2, 3])").unwrap().to_string(),
+            "[1, 2, 3]"
+        );
+        assert_eq!(
+            interp.eval("str({'a': 1, 'b': 2})").unwrap().to_string(),
+            "{a: 1, b: 2}"
+        );
+        assert_eq!(
+            interp.eval("dict({'a': 1, 'b': 2})").unwrap().to_string(),
+            "{a: 1, b: 2}"
+        );
+        assert_eq!(
+            interp.eval("list([1, 2, 3])").unwrap().to_string(),
+            "[1, 2, 3]"
+        );
+        assert_eq!(
+            interp.eval("set([1, 2, 3])").unwrap().to_string(),
+            "{1, 2, 3}"
+        );
     }
 
     #[test]

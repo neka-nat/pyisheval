@@ -20,9 +20,11 @@ use nom::{
 /// comparison := additive ((">" | "<" | ">=" | "<=" | "==" | "!=") additive)*
 /// additive := multiplicative (("+" | "-") multiplicative)*
 /// multiplicative := exponentiation (("*" | "/" | "%") exponentiation)*
-/// exponentiation := primary ("**" exponentiation)?
+/// exponentiation := unary_expr ("**" exponentiation)?  (右結合)
+/// unary_expr := ("+" | "-")? primary
 ///
-/// primary := number | string_lit | identifier | lambda_expr | parenthesized_or_tuple | list_literal | dict_or_set
+/// primary := number | string_lit | identifier | lambda_expr | parenthesized_or_tuple
+///             | list_literal | dict_or_set
 ///    (さらに後ろに [expr] → index_access や (args) → call_expr が続く可能性)
 ///
 /// list_literal := "[" ... "]" (list or list comprehension)
@@ -241,12 +243,13 @@ fn multiplicative(input: &str) -> IResult<&str, Expr> {
 }
 
 //---------------------------------------------------------
-// exponentiation: primary ("**" exponentiation)? (右結合)
+// exponentiation: unary_expr ("**" exponentiation)? (右結合)
 //---------------------------------------------------------
 fn exponentiation(input: &str) -> IResult<&str, Expr> {
-    let (input, base_expr) = primary(input)?;
+    let (input, base_expr) = unary_expr(input)?;
     let (input, _) = multispace0(input)?;
 
+    // " ** " が続いていれば右結合で再帰
     if let Ok((input2, _)) =
         preceded(multispace0::<&str, nom::error::Error<&str>>, tag("**"))(input)
     {
@@ -265,7 +268,41 @@ fn exponentiation(input: &str) -> IResult<&str, Expr> {
 }
 
 //---------------------------------------------------------
-// primary: number | string_lit | paren/tuple | list_literal | dict_or_set | call_or_var
+// unary_expr: ("+"|"-")? primary
+//   例: -10 や +10, -foo などを "0 - foo" 的なASTに変換
+//---------------------------------------------------------
+fn unary_expr(input: &str) -> IResult<&str, Expr> {
+    // まずオプショナルな符号を取る
+    let (input, sign_opt) = opt(alt((char('+'), char('-'))))(input)?;
+    let (input, _) = multispace0(input)?;
+
+    // 次に primary をパース
+    let (input, mut node) = primary(input)?;
+
+    // 符号が '-' なら「(0 - node)」という BinaryOp に変換
+    if let Some(sign) = sign_opt {
+        match sign {
+            '-' => {
+                let zero = Expr::Number(0.0);
+                node = Expr::BinaryOp {
+                    op: BinOp::Sub,
+                    left: Box::new(zero),
+                    right: Box::new(node),
+                };
+            }
+            '+' => {
+                // '+' は何もしない（node をそのまま）
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    Ok((input, node))
+}
+
+//---------------------------------------------------------
+// primary: number | string_lit | paren/tuple | list_literal
+//           | dict_or_set | call_or_var
 //---------------------------------------------------------
 fn primary(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
@@ -310,6 +347,9 @@ fn index_access(input: &str, expr: Expr) -> IResult<&str, Expr> {
     Ok((input, current_expr))
 }
 
+//---------------------------------------------------------
+// method_chain: .method(...) の連鎖
+//---------------------------------------------------------
 fn method_chain(mut input: &str, mut current: Expr) -> IResult<&str, Expr> {
     loop {
         let (input2, _) = multispace0(input)?;
@@ -342,8 +382,8 @@ fn method_chain(mut input: &str, mut current: Expr) -> IResult<&str, Expr> {
                 args,
             };
         } else {
-            // 仮に "obj.property" のような形にしたいなら、また別バリアントが必要
-            // ここでは Pythonっぽい "obj.method(...)" のみ想定するのでエラーにしてもよい
+            // obj.property のような形を許すなら別バリアントを返す実装など
+            // ここでは Pythonっぽく常にメソッド呼び出し想定なのでエラー
             return Err(nom::Err::Failure(Error::new(input2, ErrorKind::Tag)));
         }
 
@@ -382,7 +422,7 @@ fn list_literal(input: &str) -> IResult<&str, Expr> {
 }
 
 //---------------------------------------------------------
-// parse_list_comprehension: [ elem_expr for var in iter if cond? ]
+// parse_list_comprehension: [ elem_expr for var in expr (if cond)? ]
 //---------------------------------------------------------
 fn parse_list_comprehension(input: &str, elem_expr: Expr) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
@@ -437,6 +477,7 @@ fn parse_normal_list(mut input: &str, first_expr: Expr) -> IResult<&str, Expr> {
                 input = input2;
                 continue;
             } else {
+                // 末尾カンマ等
                 input = input2;
                 break;
             }
@@ -454,8 +495,8 @@ fn parse_normal_list(mut input: &str, first_expr: Expr) -> IResult<&str, Expr> {
 //---------------------------------------------------------
 // dict_or_set: "{" ... "}"
 //   1) 空なら => Dict(vec![])
-//   2) 最初の要素が "key_expr : value_expr" なら => さらに "for" があれば dict comprehension
-//   3) なければ => 通常のdict/set (既存ロジック)
+//   2) 最初が "key : value" ならさらに "for" があれば dict comprehension
+//   3) なければ通常のdict or set
 //---------------------------------------------------------
 fn dict_or_set(input: &str) -> IResult<&str, Expr> {
     let (input, _) = preceded(multispace0, char('{'))(input)?;
@@ -467,10 +508,7 @@ fn dict_or_set(input: &str) -> IResult<&str, Expr> {
         return Ok((rest, Expr::Dict(vec![])));
     }
 
-    // まず "key_expr : value_expr" を試し、 そのあと "for" があれば dict comprehension
-    // バックトラックなしでも大丈夫ですが、必要に応じて実装可能
-
-    // key_expr
+    // まず key_expr : value_expr を試す
     let (input_key, key_expr) = expr_wrapper(input)?;
     let (input_key, _) = multispace0(input_key)?;
     let (input_key, colon_char) = opt(char(':'))(input_key)?;
@@ -481,25 +519,23 @@ fn dict_or_set(input: &str) -> IResult<&str, Expr> {
         let (input_val, value_expr) = expr_wrapper(input_val)?;
         let (input_val, _) = multispace0(input_val)?;
 
-        // "for" なら dict comprehension
+        // "for" => dict comprehension
         if let Ok((input_for, _)) =
             preceded(multispace0::<&str, nom::error::Error<&str>>, tag("for"))(input_val)
         {
             return parse_dict_comprehension(input_for, key_expr, value_expr);
         } else {
-            // 通常の dict の最初のペアとして扱い、残りを parse_normal_dict
+            // 通常の dict
             return parse_normal_dict(input_val, key_expr, value_expr);
         }
     } else {
-        // key_expr のみ => これは set かもしれない
-        // parse_set で処理
+        // key_expr のみ => set
         return parse_normal_set(input_key, key_expr);
     }
 }
 
 //---------------------------------------------------------
-// parse_dict_comprehension: { key_expr : value_expr for var in iter if cond? }
-//   (バックトラックあり)
+// parse_dict_comprehension: { key_expr : value_expr for var in expr if cond? }
 //---------------------------------------------------------
 fn parse_dict_comprehension(input: &str, key_expr: Expr, value_expr: Expr) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
@@ -508,8 +544,7 @@ fn parse_dict_comprehension(input: &str, key_expr: Expr, value_expr: Expr) -> IR
     let (input, _) = tag("in")(input)?;
     let (input, _) = multispace0(input)?;
 
-    // バックトラックでイテレーション対象をパース
-    let (input, (iter_expr, _filter_if_taken)) = parse_iter_expr_with_backtracking(input)?;
+    let (input, (iter_expr, _)) = parse_iter_expr_with_backtracking(input)?;
 
     // if cond?
     let (input, cond_expr) = {
@@ -525,11 +560,9 @@ fn parse_dict_comprehension(input: &str, key_expr: Expr, value_expr: Expr) -> IR
         }
     };
 
-    // "}"
     let (input, _) = multispace0(input)?;
     let (input, _) = char('}')(input)?;
 
-    // <-- Added a new variant `Expr::DictComp` in AST
     Ok((
         input,
         Expr::DictComp {
@@ -543,18 +576,16 @@ fn parse_dict_comprehension(input: &str, key_expr: Expr, value_expr: Expr) -> IR
 }
 
 //---------------------------------------------------------
-// parse_normal_dict: "key_expr : value_expr" のペアを最初に1つ受け取ったあと、
-//   カンマ区切りで後続のペアを parse_dict_item_or_expr として収集
+// parse_normal_dict: "key_expr : value_expr" を最初に1つ受け取った後、
+//   カンマ区切りで後続の (k_expr, v_expr) を収集
 //---------------------------------------------------------
 fn parse_normal_dict(mut input: &str, first_key: Expr, first_val: Expr) -> IResult<&str, Expr> {
-    // すでに最初のペアは確定
     let mut pairs = vec![(expr_to_dict_key(first_key)?, first_val)];
 
     loop {
         // カンマチェック
         let (input2, opt_comma) = opt(preceded(multispace0, char(',')))(input)?;
         if opt_comma.is_some() {
-            // parse next "key_expr : value_expr" or nothing
             let (input2, _) = multispace0(input2)?;
             // 次が '}' なら末尾カンマ
             if let Ok((rest, _)) =
@@ -575,16 +606,14 @@ fn parse_normal_dict(mut input: &str, first_key: Expr, first_val: Expr) -> IResu
         }
     }
 
-    // 最後に "}" を読む
     let (input, _) = multispace0(input)?;
     let (input, _) = char('}')(input)?;
-
     Ok((input, Expr::Dict(pairs)))
 }
 
 //---------------------------------------------------------
 // parse_normal_set: set は { expr, expr, ... }
-//   すでに1つ目の expr を受け取っているので、カンマ続きで要素を収集
+//   既に1つ目の expr を受け取っているので、カンマ区切りで要素を収集
 //---------------------------------------------------------
 fn parse_normal_set(mut input: &str, first_expr: Expr) -> IResult<&str, Expr> {
     let mut set_elems = vec![first_expr];
@@ -696,7 +725,8 @@ fn var_expr(input: &str) -> IResult<&str, Expr> {
 }
 
 //---------------------------------------------------------
-// number: 整数 or 小数
+// number: 整数 or 小数 (ただし先頭に符号は含まない)
+//   ただし unary_expr で + / - を扱うのでここでは非負を想定
 //---------------------------------------------------------
 fn number(input: &str) -> IResult<&str, Expr> {
     let (input, num_str) = recognize_float(input)?;
@@ -715,7 +745,7 @@ fn string_lit(input: &str) -> IResult<&str, Expr> {
 }
 
 //---------------------------------------------------------
-// recognize_float: 整数 or 小数
+// recognize_float: 整数 or 小数 (先頭符号は含まない想定)
 //---------------------------------------------------------
 fn recognize_float(input: &str) -> IResult<&str, String> {
     let (input, integer_part) = take_while1(|c: char| c.is_ascii_digit())(input)?;
@@ -748,12 +778,10 @@ fn identifier(input: &str) -> IResult<&str, String> {
 fn parse_iter_expr_with_backtracking(input: &str) -> IResult<&str, (Expr, bool)> {
     // まず expr_wrapper を試す
     if let Ok((rest, expr)) = expr_wrapper(input) {
-        // 成功 => それを返す
         return Ok((rest, (expr, false)));
     }
 
     // 失敗 => フォールバック
-    //   例として identifier / number / string の先頭だけをイテレータとみなす
     let (rest, fallback_expr) = alt((number, string_lit, var_expr))(input)?;
     Ok((rest, (fallback_expr, false)))
 }

@@ -2,13 +2,14 @@ use crate::ast::{BinOp, Expr};
 use crate::parser::parse_expr;
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::cell::RefCell;
 use std::rc::Rc;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
 pub struct Env {
     vars: HashMap<String, Value>,
-    parent: Option<Rc<Env>>,
+    parent: Option<Rc<RefCell<Env>>>,
 }
 
 impl PartialEq for Env {
@@ -23,7 +24,7 @@ pub enum Value {
     Lambda {
         param: String,
         body: Expr,
-        env: Rc<Env>,
+        env: Rc<RefCell<Env>>,
     },
     Builtin {
         name: String,
@@ -470,7 +471,7 @@ impl Env {
         }
     }
 
-    fn with_parent(parent: Rc<Env>) -> Self {
+    fn with_parent(parent: Rc<RefCell<Env>>) -> Self {
         Env {
             vars: HashMap::new(),
             parent: Some(parent),
@@ -481,7 +482,7 @@ impl Env {
         if let Some(v) = self.vars.get(name) {
             Some(v.clone())
         } else if let Some(p) = &self.parent {
-            p.get(name)
+            p.borrow().get(name)
         } else {
             None
         }
@@ -493,7 +494,7 @@ impl Env {
 }
 
 pub struct Interpreter {
-    env: Rc<Env>,
+    env: Rc<RefCell<Env>>,
 }
 
 impl Interpreter {
@@ -628,7 +629,7 @@ impl Interpreter {
         );
 
         Interpreter {
-            env: Rc::new(base_env),
+            env: Rc::new(RefCell::new(base_env)),
         }
     }
 
@@ -638,13 +639,28 @@ impl Interpreter {
         self.env = new_env;
         Ok(val)
     }
+
+    pub fn eval_with_context(
+        &self,
+        code: &str,
+        context: &HashMap<String, Value>,
+    ) -> Result<Value, EvalError> {
+        let env = Rc::new(RefCell::new(self.env.borrow().clone()));
+        for (name, value) in context.iter() {
+            env.borrow_mut().set(name, value.clone());
+        }
+        let expr = parse_expr(code).map_err(EvalError::ParseError)?;
+        let (val, _) = eval_expr(expr, Rc::clone(&env))?;
+        Ok(val)
+    }
 }
 
-pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError> {
+pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell<Env>>), EvalError> {
     match expr {
         Expr::Number(n) => Ok((Value::Number(n), env)),
         Expr::Var(name) => {
             let val = env
+                .borrow()
                 .get(&name)
                 .ok_or_else(|| EvalError::UndefinedVar(name))?;
             Ok((val, env))
@@ -759,11 +775,9 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
             Ok((val, env))
         }
         Expr::Assign { name, expr } => {
-            let (val, mut_env) = eval_expr(*expr, env)?;
-            let mut new_env = (*mut_env).clone();
-            new_env.set(&name, val.clone());
-            let new_env = Rc::new(new_env);
-            Ok((val, new_env))
+            let (val, env) = eval_expr(*expr, env)?;
+            env.borrow_mut().set(&name, val.clone());
+            Ok((val, env))
         }
         Expr::Lambda { param, body } => {
             let val = Value::Lambda {
@@ -796,7 +810,7 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
                     let arg_val = arg_vals.into_iter().next().unwrap();
                     let mut call_env = Env::with_parent(closure_env.clone());
                     call_env.set(&param, arg_val);
-                    let call_env = Rc::new(call_env);
+                    let call_env = Rc::new(RefCell::new(call_env));
                     let (res, _) = eval_expr(body, call_env)?;
                     Ok((res, new_env))
                 }
@@ -821,7 +835,7 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
         }
         Expr::List(exprs) => {
             let mut vals = Vec::new();
-            let mut cur_env = env;
+            let mut cur_env = env.clone();
             for e in exprs {
                 let (val, e2) = eval_expr(e, cur_env)?;
                 cur_env = e2;
@@ -831,7 +845,7 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
         }
         Expr::Tuple(exprs) => {
             let mut vals = Vec::new();
-            let mut cur_env = env;
+            let mut cur_env = env.clone();
             for e in exprs {
                 let (val, e2) = eval_expr(e, cur_env)?;
                 cur_env = e2;
@@ -841,7 +855,7 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
         }
         Expr::Set(exprs) => {
             let mut vals = Vec::new();
-            let mut cur_env = env;
+            let mut cur_env = env.clone();
             for e in exprs {
                 let (val, e2) = eval_expr(e, cur_env)?;
                 cur_env = e2;
@@ -852,7 +866,7 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
         }
         Expr::Dict(pairs) => {
             let mut map = IndexMap::new();
-            let mut cur_env = env;
+            let mut cur_env = env.clone();
             for (k, vexpr) in pairs {
                 let (val, env2) = eval_expr(vexpr, cur_env)?;
                 cur_env = env2;
@@ -885,9 +899,9 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
             let current_env = env.clone();
             for item in items {
                 // varにitemをバインドした環境でexprを評価
-                let mut new_env_data = (*current_env).clone();
+                let mut new_env_data = (*current_env).borrow().clone();
                 new_env_data.set(&var, item);
-                let new_env = Rc::new(new_env_data);
+                let new_env = Rc::new(RefCell::new(new_env_data));
 
                 // 条件式チェック
                 if let Some(cond_expr) = &cond {
@@ -927,9 +941,9 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
             let mut result_map = IndexMap::new();
             let current_env = env.clone();
             for item in items {
-                let mut new_env_data = (*current_env).clone();
+                let mut new_env_data = (*current_env).borrow().clone();
                 new_env_data.set(&var, item);
-                let new_env = Rc::new(new_env_data);
+                let new_env = Rc::new(RefCell::new(new_env_data));
 
                 if let Some(cond_expr) = &cond {
                     let (cond_val, _) = eval_expr((**cond_expr).clone(), new_env.clone())?;
@@ -1355,7 +1369,7 @@ fn do_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, Eval
 
         // 28) maketrans
         //     Python では文字 → 文字、または削除文字など複雑。
-        //     ここでは簡易的に dict を返すだけにする or 未実装エラー
+        //     ここでは簡易的に dict を返すだけにす��� or 未実装エラー
         "maketrans" => {
             // 本家 Python だと {ord(c1): c2, ...} のようなマッピングを作る
             // ここでは単に TypeError にするか、空dictを返す例など

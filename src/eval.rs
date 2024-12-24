@@ -88,6 +88,15 @@ impl std::fmt::Display for Value {
     }
 }
 
+impl Value {
+    pub fn to_bool(&self) -> bool {
+        match self {
+            Value::Number(n) => *n != 0.0,
+            _ => false,
+        }
+    }
+}
+
 type BuiltinFn = fn(&[f64]) -> Result<f64, EvalError>;
 type BuiltinValueFn = fn(&[Value]) -> Result<Value, EvalError>;
 
@@ -652,6 +661,12 @@ impl Interpreter {
         let expr = parse_expr(code).map_err(EvalError::ParseError)?;
         let (val, _) = eval_expr(expr, Rc::clone(&env))?;
         Ok(val)
+    }
+
+    pub fn eval_boolean(&self, code: &str) -> Result<bool, EvalError> {
+        let expr = parse_expr(code).map_err(EvalError::ParseError)?;
+        let (val, _) = eval_expr(expr, Rc::clone(&self.env))?;
+        Ok(val.to_bool())
     }
 }
 

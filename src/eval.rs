@@ -670,17 +670,21 @@ pub fn eval_expr(expr: Expr, env: Rc<Env>) -> Result<(Value, Rc<Env>), EvalError
                 arg_vals.push(av);
             }
 
-            // 3) オブジェクトの型ごとにメソッド処理を分岐
+            // 3) オブジェクト型ごとにメソッドを呼び出す
             let result = match obj_val {
                 Value::StringLit(s) => {
-                    // すでに前回の do_string_method(...) を作っているなら呼び出し
+                    // 文字列用メソッド (前回実装済み想定)
                     do_string_method(&s, &method, &arg_vals)?
                 }
                 Value::List(lst) => {
-                    // 今回新規に追加: リスト用メソッド
+                    // リスト用メソッド (前回実装済み想定)
                     do_list_method(&lst, &method, &arg_vals)?
                 }
-                // 他にオブジェクトへメソッドを定義したければ追加
+                Value::Dict(m) => {
+                    // 今回新たに追加: Dict 用メソッド
+                    do_dict_method(&m, &method, &arg_vals)?
+                }
+                // その他の型に対してメソッド呼び出しはエラー
                 _ => {
                     return Err(EvalError::TypeError);
                 }
@@ -719,10 +723,12 @@ fn extract_index(val: &Value) -> Result<usize, EvalError> {
     }
 }
 
+/// 文字列/Var からキー文字列を取り出す補助関数
 fn extract_key(val: &Value) -> Result<String, EvalError> {
     match val {
         Value::Var(s) => Ok(s.clone()),
         Value::StringLit(s) => Ok(s.clone()),
+        Value::Number(n) => Ok(n.to_string()), // 数値キーを文字列化して使うなど(簡易実装)
         _ => Err(EvalError::TypeError),
     }
 }
@@ -1580,6 +1586,228 @@ fn do_list_method(list: &Vec<Value>, method: &str, args: &[Value]) -> Result<Val
         // その他
         other => Err(EvalError::UndefinedVar(format!(
             "Unknown list method: {}",
+            other
+        ))),
+    }
+}
+
+fn do_dict_method(
+    map: &IndexMap<String, Value>,
+    method: &str,
+    args: &[Value],
+) -> Result<Value, EvalError> {
+    match method {
+        //--------------------------------------------------------------------------------
+        // 1) clear()
+        //    - すべての要素を削除した空の Dict を返す
+        "clear" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("clear".to_string()));
+            }
+            let new_map = IndexMap::new();
+            Ok(Value::Dict(new_map))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 2) copy()
+        //    - 同じ要素を持つ新たな Dict を返す
+        "copy" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("copy".to_string()));
+            }
+            let new_map = map.clone();
+            Ok(Value::Dict(new_map))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 3) fromkeys(iterable, value=None)
+        //    - クラスメソッド的な位置付けだが、ここでは "some_dict.fromkeys(...)" 形式で呼ばれたら
+        //      新規にキーだけをセットした Dict を返す
+        "fromkeys" => {
+            // 引数: iterable, value(省略可)
+            let iterable = args
+                .get(0)
+                .ok_or_else(|| EvalError::ArgError("fromkeys".to_string()))?;
+            let default_val = args.get(1).unwrap_or(&Value::Number(0.0)).clone();
+            // ここでは省略時に Number(0.0) など、適当に
+            let keys_list = match iterable {
+                Value::List(v) => v.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
+                Value::Tuple(v) => v.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
+                Value::Set(v) => v.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
+                Value::Dict(m) => m.keys().cloned().collect::<Vec<_>>(),
+                // Python だと文字列を1文字ずつイテレートするなどあるが、ここでは簡易実装
+                _ => return Err(EvalError::TypeError),
+            };
+
+            let mut new_map = IndexMap::new();
+            for k in keys_list {
+                new_map.insert(k, default_val.clone());
+            }
+            Ok(Value::Dict(new_map))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 4) get(key, default=None)
+        //    - キーがあればその値、無ければデフォルトを返す
+        "get" => {
+            let key = args
+                .get(0)
+                .ok_or_else(|| EvalError::ArgError("get".to_string()))?;
+            let default_val = args.get(1).unwrap_or(&Value::Number(0.0));
+            let k = extract_key(key)?;
+            if let Some(v) = map.get(&k) {
+                Ok(v.clone())
+            } else {
+                Ok(default_val.clone())
+            }
+        }
+
+        //--------------------------------------------------------------------------------
+        // 5) items()
+        //    - [(k, v), (k, v), ...] というリストを返す
+        "items" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("items".to_string()));
+            }
+            let mut lst = Vec::new();
+            for (k, v) in map.iter() {
+                // タプル (key, value)
+                lst.push(Value::Tuple(vec![Value::StringLit(k.clone()), v.clone()]));
+            }
+            Ok(Value::List(lst))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 6) keys()
+        //    - [k1, k2, k3, ...] というリストを返す
+        "keys" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("keys".to_string()));
+            }
+            let mut lst = Vec::new();
+            for k in map.keys() {
+                lst.push(Value::StringLit(k.clone()));
+            }
+            Ok(Value::List(lst))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 7) pop(key, default=エラー)
+        //    - key があればその値を返す（返した結果、辞書から消える…はずだが、ここは純粋関数型なので消えない）
+        //    - 無ければ default があればそれを返す、無ければエラー
+        "pop" => {
+            let key_val = args
+                .get(0)
+                .ok_or_else(|| EvalError::ArgError("pop".to_string()))?;
+            let default_val = args.get(1);
+            let k = extract_key(key_val)?;
+            if let Some(v) = map.get(&k) {
+                // key が存在
+                Ok(v.clone())
+            } else {
+                // key が無い
+                if let Some(dv) = default_val {
+                    Ok(dv.clone())
+                } else {
+                    return Err(EvalError::ArgError("key not found".to_string()));
+                }
+            }
+        }
+
+        //--------------------------------------------------------------------------------
+        // 8) popitem()
+        //    - 最後に挿入された (key, value) を削除して (key, value) タプルを返す
+        //    - Python 3.6+ は OrderedDict 同等なので、IndexMap の挿入順序と同じ
+        //    - ここも実際には消えないが、値だけ返す例にする
+        "popitem" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("popitem".to_string()));
+            }
+            if map.is_empty() {
+                return Err(EvalError::ArgError("popitem: dict is empty".to_string()));
+            }
+            let (last_k, last_v) = map.last().unwrap(); // IndexMap は最後の要素をこう取れる
+                                                        // 返すのは (key, value) タプル
+            Ok(Value::Tuple(vec![
+                Value::StringLit(last_k.clone()),
+                last_v.clone(),
+            ]))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 9) setdefault(key, default=None)
+        //    - key があればその値を返す。無ければ default を登録して default を返す…が、
+        //      ここでは純粋関数型なので dict は更新されず、「最終的な値だけ返す」にする
+        "setdefault" => {
+            let key_val = args
+                .get(0)
+                .ok_or_else(|| EvalError::ArgError("setdefault".to_string()))?;
+            let default_val = args.get(1).unwrap_or(&Value::Number(0.0));
+            let k = extract_key(key_val)?;
+
+            if let Some(v) = map.get(&k) {
+                // すでにキーがある場合 => その値を返す
+                Ok(v.clone())
+            } else {
+                // ない場合 => default_val
+                Ok(default_val.clone())
+            }
+        }
+
+        //--------------------------------------------------------------------------------
+        // 10) update(other_dict)
+        //     - 引数を Dict や (key, value) リスト・タプルなどとみなし、キーを上書き or 追加して、
+        //       「新しい dict」を返す
+        "update" => {
+            if args.len() != 1 {
+                return Err(EvalError::ArgError("update".to_string()));
+            }
+            let mut new_map = map.clone();
+
+            match &args[0] {
+                // 1) Dict => すべての (k, v) をコピー
+                Value::Dict(m2) => {
+                    for (k, v) in m2.iter() {
+                        new_map.insert(k.clone(), v.clone());
+                    }
+                }
+                // 2) リスト or タプル => [(k, v), ...] な構造かを期待
+                Value::List(lst) | Value::Tuple(lst) => {
+                    for item in lst {
+                        match item {
+                            Value::Tuple(tv) if tv.len() == 2 => {
+                                let k = tv[0].to_string();
+                                let v = tv[1].clone();
+                                new_map.insert(k, v);
+                            }
+                            _ => return Err(EvalError::TypeError),
+                        }
+                    }
+                }
+                _ => return Err(EvalError::TypeError),
+            }
+
+            Ok(Value::Dict(new_map))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 11) values()
+        //     - [v1, v2, v3, ...] というリストを返す
+        "values" => {
+            if !args.is_empty() {
+                return Err(EvalError::ArgError("values".to_string()));
+            }
+            let mut lst = Vec::new();
+            for v in map.values() {
+                lst.push(v.clone());
+            }
+            Ok(Value::List(lst))
+        }
+
+        //--------------------------------------------------------------------------------
+        // 未知のメソッド
+        other => Err(EvalError::UndefinedVar(format!(
+            "Unknown dict method: {}",
             other
         ))),
     }

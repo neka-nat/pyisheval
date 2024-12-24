@@ -142,7 +142,29 @@ mod test {
     fn test_list_method() {
         let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3]").unwrap();
-        assert_eq!(interp.eval("x.append(4)").unwrap().to_string(), "[1, 2, 3, 4]");
+        assert_eq!(
+            interp.eval("x.append(4)").unwrap().to_string(),
+            "[1, 2, 3, 4]"
+        );
         assert_eq!(interp.eval("x.clear()").unwrap().to_string(), "[]");
+    }
+
+    #[test]
+    fn test_dict_method() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = {'a': 1, 'b': 2}").unwrap();
+        assert_eq!(interp.eval("x.clear()").unwrap().to_string(), "{}");
+        interp.eval("x = {'a': 1, 'b': 2}").unwrap();
+        assert_eq!(interp.eval("x.get('a')").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("x.get('c', 0)").unwrap().to_string(), "0");
+        interp.eval("x = {'a': 1, 'b': 2}").unwrap();
+        assert_eq!(
+            interp.eval("x.items()").unwrap().to_string(),
+            "[(a, 1), (b, 2)]"
+        );
+        interp.eval("x = {'a': 1, 'b': 2}").unwrap();
+        assert_eq!(interp.eval("x.keys()").unwrap().to_string(), "[a, b]");
+        interp.eval("x = {'a': 1, 'b': 2}").unwrap();
+        assert_eq!(interp.eval("x.values()").unwrap().to_string(), "[1, 2]");
     }
 }

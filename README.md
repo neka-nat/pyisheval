@@ -1,5 +1,7 @@
 # pyisheval
 
+[![crates.io](https://img.shields.io/crates/v/pyisheval.svg)](https://crates.io/crates/pyisheval)
+
 `pyisheval` is a Rust library that allows you to evaluate Python-like expressions.  
 It's not a full Python interpreter, but it supports a subset of Python-like syntax:
 

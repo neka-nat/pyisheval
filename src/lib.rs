@@ -204,4 +204,52 @@ mod test {
         interp.eval("x = {'a': 1, 'b': 2}").unwrap();
         assert_eq!(interp.eval("x.values()").unwrap().to_string(), "[1, 2]");
     }
+
+    #[test]
+    fn test_strings_non_empty_single_quote() {
+        let interp = Interpreter::new();
+        assert_eq!(
+            interp
+                .eval_with_context("'a'", &Default::default())
+                .unwrap()
+                .to_string(),
+            "a"
+        );
+        assert_eq!(
+            interp
+                .eval_with_context("'hello'", &Default::default())
+                .unwrap()
+                .to_string(),
+            "hello"
+        );
+        assert!(interp.eval_boolean("'a' == 'a'").unwrap());
+    }
+
+    #[test]
+    fn test_strings_single_quote_empty() {
+        let interp = Interpreter::new();
+        assert_eq!(
+            interp
+                .eval_with_context("''", &Default::default())
+                .unwrap()
+                .to_string(),
+            ""
+        );
+        assert!(interp.eval_boolean("'' == ''").unwrap());
+        assert_eq!(
+            interp
+                .eval_with_context("len('')", &Default::default())
+                .unwrap()
+                .to_string(),
+            "0"
+        );
+    }
+
+    #[test]
+    fn test_strings_empty_comparison() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = ''").unwrap();
+        assert!(interp.eval_boolean("x == ''").unwrap());
+        assert!(interp.eval_boolean("x != 'foo'").unwrap());
+    }
 }

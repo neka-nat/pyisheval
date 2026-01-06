@@ -3,7 +3,7 @@ use nom::error::Error;
 use nom::error::ErrorKind;
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while1},
+    bytes::complete::{tag, take_while, take_while1},
     character::complete::{char, multispace0},
     combinator::opt,
     multi::separated_list0,
@@ -739,7 +739,7 @@ fn number(input: &str) -> IResult<&str, Expr> {
 //---------------------------------------------------------
 fn string_lit(input: &str) -> IResult<&str, Expr> {
     let (input, _) = char('\'')(input)?;
-    let (input, s) = take_while1(|c: char| c != '\'')(input)?;
+    let (input, s) = take_while(|c: char| c != '\'')(input)?;
     let (input, _) = char('\'')(input)?;
     Ok((input, Expr::StringLit(s.to_string())))
 }

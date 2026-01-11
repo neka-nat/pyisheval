@@ -4,10 +4,10 @@ use nom::error::ErrorKind;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
-    character::complete::{char, multispace0},
-    combinator::opt,
+    character::complete::{char, digit0, digit1, multispace0, one_of},
+    combinator::{opt, recognize},
     multi::separated_list0,
-    sequence::{delimited, pair, preceded},
+    sequence::{delimited, pair, preceded, tuple},
     IResult,
 };
 
@@ -729,9 +729,11 @@ fn var_expr(input: &str) -> IResult<&str, Expr> {
 //   ただし unary_expr で + / - を扱うのでここでは非負を想定
 //---------------------------------------------------------
 fn number(input: &str) -> IResult<&str, Expr> {
-    let (input, num_str) = recognize_float(input)?;
-    let val: f64 = num_str.parse().unwrap();
-    Ok((input, Expr::Number(val)))
+    let (remaining_input, num_str) = recognize_float(input)?;
+    let val: f64 = num_str
+        .parse()
+        .map_err(|_| nom::Err::Failure(Error::new(input, ErrorKind::Float)))?;
+    Ok((remaining_input, Expr::Number(val)))
 }
 
 //---------------------------------------------------------
@@ -746,18 +748,31 @@ fn string_lit(input: &str) -> IResult<&str, Expr> {
 
 //---------------------------------------------------------
 // recognize_float: 整数 or 小数 (先頭符号は含まない想定)
+// Supports:
+// - Leading dot: .5, .02
+// - Trailing dot: 4., 123.
+// - Scientific notation: 1e-3, 2.5e2, .5e-2
+//
+// Grammar: mantissa [exponent]?
+// - mantissa: digit+ [. digit*]? | . digit+
+// - exponent: [eE] [+-]? digit+
 //---------------------------------------------------------
-fn recognize_float(input: &str) -> IResult<&str, String> {
-    let (input, integer_part) = take_while1(|c: char| c.is_ascii_digit())(input)?;
-    let (input, fractional_part) = opt(preceded(
-        char('.'),
-        take_while1(|c: char| c.is_ascii_digit()),
-    ))(input)?;
-    if let Some(frac) = fractional_part {
-        Ok((input, format!("{}.{}", integer_part, frac)))
-    } else {
-        Ok((input, integer_part.to_string()))
-    }
+fn recognize_float(input: &str) -> IResult<&str, &str> {
+    recognize(pair(
+        // Mantissa: standard (123.456, 123.) or leading dot (.456)
+        alt((
+            // Standard: 123.456 or 123.
+            recognize(tuple((digit1, opt(tuple((char('.'), digit0)))))),
+            // Leading dot: .456
+            recognize(tuple((char('.'), digit1))),
+        )),
+        // Optional exponent: e/E, optional +/-, digits
+        opt(tuple((
+            one_of("eE"),
+            opt(one_of("+-")),
+            digit1,
+        ))),
+    ))(input)
 }
 
 //---------------------------------------------------------

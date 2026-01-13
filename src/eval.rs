@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Expr};
+use crate::ast::{BinOp, Expr, UnOp};
 use crate::parser::parse_expr;
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -92,7 +92,12 @@ impl Value {
     pub fn to_bool(&self) -> bool {
         match self {
             Value::Number(n) => *n != 0.0,
-            _ => false,
+            Value::StringLit(s) => !s.is_empty(),
+            Value::List(v) => !v.is_empty(),
+            Value::Tuple(v) => !v.is_empty(),
+            Value::Set(v) => !v.is_empty(),
+            Value::Dict(m) => !m.is_empty(),
+            _ => true, // Lambdas, builtins, etc. are truthy
         }
     }
 }
@@ -681,6 +686,13 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
             Ok((val, env))
         }
         Expr::StringLit(s) => Ok((Value::StringLit(s), env)),
+        Expr::UnaryOp { op, operand } => {
+            let (val, env) = eval_expr(*operand, env)?;
+            let result = match op {
+                UnOp::Not => Value::Number(if val.to_bool() { 0.0 } else { 1.0 }),
+            };
+            Ok((result, env))
+        }
         Expr::BinaryOp { op, left, right } => {
             let (lval, env) = eval_expr(*left, env)?;
             let (rval, env) = eval_expr(*right, env)?;

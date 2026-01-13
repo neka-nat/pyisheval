@@ -357,4 +357,97 @@ mod test {
             result
         );
     }
+
+    #[test]
+    fn test_not_operator_numbers() {
+        let mut interp = Interpreter::new();
+        // not 0 is True (1 in pyisheval)
+        assert_eq!(interp.eval("not 0").unwrap().to_string(), "1");
+        // not 1 is False (0)
+        assert_eq!(interp.eval("not 1").unwrap().to_string(), "0");
+        // not 5 is False
+        assert_eq!(interp.eval("not 5").unwrap().to_string(), "0");
+        // not -1 is False
+        assert_eq!(interp.eval("not -1").unwrap().to_string(), "0");
+        // not 0.0 is True
+        assert_eq!(interp.eval("not 0.0").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_not_operator_strings() {
+        let mut interp = Interpreter::new();
+        // not '' is True
+        assert_eq!(interp.eval("not ''").unwrap().to_string(), "1");
+        // not 'foo' is False
+        assert_eq!(interp.eval("not 'foo'").unwrap().to_string(), "0");
+        // not 'hello' is False
+        assert_eq!(interp.eval("not 'hello'").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_not_operator_collections() {
+        let mut interp = Interpreter::new();
+        // not [] is True
+        assert_eq!(interp.eval("not []").unwrap().to_string(), "1");
+        // not [1, 2] is False
+        assert_eq!(interp.eval("not [1, 2]").unwrap().to_string(), "0");
+        // not {} is True
+        assert_eq!(interp.eval("not {}").unwrap().to_string(), "1");
+        // not {'a': 1} is False
+        assert_eq!(interp.eval("not {'a': 1}").unwrap().to_string(), "0");
+        // not (1, 2) is False
+        assert_eq!(interp.eval("not (1, 2)").unwrap().to_string(), "0");
+        // not () is True
+        assert_eq!(interp.eval("not ()").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_not_operator_chaining() {
+        let mut interp = Interpreter::new();
+        // Double negation
+        assert_eq!(interp.eval("not not 0").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("not not 1").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("not not 5").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_not_operator_with_variables() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = 0").unwrap();
+        assert_eq!(interp.eval("not x").unwrap().to_string(), "1");
+
+        interp.eval("y = 10").unwrap();
+        assert_eq!(interp.eval("not y").unwrap().to_string(), "0");
+
+        interp.eval("empty = ''").unwrap();
+        assert_eq!(interp.eval("not empty").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_not_operator_in_expressions() {
+        let mut interp = Interpreter::new();
+        // not in comparisons
+        assert_eq!(interp.eval("not (1 > 2)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("not (1 < 2)").unwrap().to_string(), "0");
+
+        // not with arithmetic
+        interp.eval("x = 5").unwrap();
+        assert_eq!(interp.eval("not (x - 5)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("not (x * 2)").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_not_operator_precedence() {
+        let mut interp = Interpreter::new();
+        // not has lower precedence than comparisons in Python
+        // "not 1 == 0" should parse as "not (1 == 0)" → not False → True
+        assert_eq!(interp.eval("not 1 == 0").unwrap().to_string(), "1");
+
+        // Critical test case: not 2 == 1 should be not (2 == 1) → not False → True
+        assert_eq!(interp.eval("not 2 == 1").unwrap().to_string(), "1");
+
+        // But we want to ensure parentheses work correctly too
+        assert_eq!(interp.eval("(not 1) == 0").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("(not 2) == 1").unwrap().to_string(), "0");
+    }
 }

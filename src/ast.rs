@@ -10,6 +10,10 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    UnaryOp {
+        op: UnOp,
+        operand: Box<Expr>,
+    },
     Assign {
         name: String,
         expr: Box<Expr>,
@@ -70,6 +74,19 @@ pub enum BinOp {
     Le,
     Eq,
     Ne,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnOp {
+    Not,
+}
+
+impl fmt::Display for UnOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UnOp::Not => write!(f, "not"),
+        }
+    }
 }
 
 impl fmt::Display for BinOp {

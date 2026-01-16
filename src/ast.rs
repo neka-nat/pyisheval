@@ -59,7 +59,7 @@ pub enum Expr {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,
     Sub,
@@ -74,6 +74,8 @@ pub enum BinOp {
     Le,
     Eq,
     Ne,
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +107,8 @@ impl fmt::Display for BinOp {
             BinOp::Le => write!(f, "<="),
             BinOp::Eq => write!(f, "=="),
             BinOp::Ne => write!(f, "!="),
+            BinOp::And => write!(f, "and"),
+            BinOp::Or => write!(f, "or"),
         }
     }
 }

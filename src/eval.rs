@@ -698,6 +698,24 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
             Ok((result, env))
         }
         Expr::BinaryOp { op, left, right } => {
+            // Handle And with short-circuit evaluation
+            if op == BinOp::And {
+                let (lval, env) = eval_expr(*left, env)?;
+                if !lval.to_bool() {
+                    return Ok((lval, env)); // Short-circuit on false
+                }
+                return eval_expr(*right, env);
+            }
+            // Handle Or with short-circuit evaluation
+            if op == BinOp::Or {
+                let (lval, env) = eval_expr(*left, env)?;
+                if lval.to_bool() {
+                    return Ok((lval, env)); // Short-circuit on true
+                }
+                return eval_expr(*right, env);
+            }
+
+            // For other operators, evaluate both sides
             let (lval, env) = eval_expr(*left, env)?;
             let (rval, env) = eval_expr(*right, env)?;
             let val = match op {
@@ -802,6 +820,9 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
                     }
                     _ => return Err(EvalError::TypeError),
                 },
+                BinOp::And | BinOp::Or => {
+                    unreachable!("And/Or handled above with short-circuit evaluation")
+                }
             };
             Ok((val, env))
         }

@@ -642,6 +642,10 @@ impl Interpreter {
             },
         );
 
+        // Python boolean constants
+        base_env.set("True", Value::Number(1.0));
+        base_env.set("False", Value::Number(0.0));
+
         Interpreter {
             env: Rc::new(RefCell::new(base_env)),
         }

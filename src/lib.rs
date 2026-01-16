@@ -164,6 +164,17 @@ mod test {
     }
 
     #[test]
+    fn test_chained_conditional() {
+        let mut interp = Interpreter::new();
+        // Python: 1 if False else 2 if False else 3 → evaluates to 3
+        assert_eq!(interp.eval("1 if 0 else 2 if 0 else 3").unwrap().to_string(), "3");
+        // Python: 1 if True else 2 if False else 3 → evaluates to 1
+        assert_eq!(interp.eval("1 if 1 else 2 if 0 else 3").unwrap().to_string(), "1");
+        // Python: 1 if False else 2 if True else 3 → evaluates to 2
+        assert_eq!(interp.eval("1 if 0 else 2 if 1 else 3").unwrap().to_string(), "2");
+    }
+
+    #[test]
     fn test_string_method() {
         let mut interp = Interpreter::new();
         assert_eq!(interp.eval("'hello'.upper()").unwrap().to_string(), "HELLO");
@@ -499,5 +510,140 @@ mod test {
         assert_eq!(interp.eval("False + 1").unwrap().to_string(), "1");
         assert_eq!(interp.eval("True * 5").unwrap().to_string(), "5");
         assert_eq!(interp.eval("False * 5").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_and_operator_basic() {
+        let mut interp = Interpreter::new();
+        // Basic and operations
+        assert_eq!(interp.eval("1 and 2").unwrap().to_string(), "2");
+        assert_eq!(interp.eval("0 and 2").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("1 and 0").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("0 and 0").unwrap().to_string(), "0");
+
+        // Boolean values
+        assert_eq!(interp.eval("True and True").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("True and False").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("False and True").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("False and False").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_or_operator_basic() {
+        let mut interp = Interpreter::new();
+        // Basic or operations
+        assert_eq!(interp.eval("1 or 2").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("0 or 2").unwrap().to_string(), "2");
+        assert_eq!(interp.eval("1 or 0").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("0 or 0").unwrap().to_string(), "0");
+
+        // Boolean values
+        assert_eq!(interp.eval("True or True").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("True or False").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("False or True").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("False or False").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_and_operator_with_comparisons() {
+        let mut interp = Interpreter::new();
+        // And with comparison expressions
+        assert_eq!(interp.eval("(5 > 3) and (10 < 20)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("(5 > 10) and (10 < 20)").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("(5 > 3) and (10 > 20)").unwrap().to_string(), "0");
+
+        // With variables
+        interp.eval("x = 5").unwrap();
+        interp.eval("y = 10").unwrap();
+        assert_eq!(interp.eval("(x > 3) and (y < 20)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("(x > 10) and (y < 20)").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_or_operator_with_comparisons() {
+        let mut interp = Interpreter::new();
+        // Or with comparison expressions
+        assert_eq!(interp.eval("(5 > 10) or (10 < 20)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("(5 > 10) or (10 > 20)").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("(5 > 3) or (10 > 20)").unwrap().to_string(), "1");
+
+        // With variables
+        interp.eval("x = 5").unwrap();
+        interp.eval("y = 10").unwrap();
+        assert_eq!(interp.eval("(x > 10) or (y < 20)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("(x > 10) or (y > 20)").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_and_or_with_strings() {
+        let mut interp = Interpreter::new();
+        // And with strings
+        assert_eq!(interp.eval("'hello' and 'world'").unwrap().to_string(), "world");
+        assert_eq!(interp.eval("'' and 'world'").unwrap().to_string(), "");
+        assert_eq!(interp.eval("'hello' and ''").unwrap().to_string(), "");
+
+        // Or with strings
+        assert_eq!(interp.eval("'hello' or 'world'").unwrap().to_string(), "hello");
+        assert_eq!(interp.eval("'' or 'world'").unwrap().to_string(), "world");
+        assert_eq!(interp.eval("'hello' or ''").unwrap().to_string(), "hello");
+    }
+
+    #[test]
+    fn test_and_or_combined() {
+        let mut interp = Interpreter::new();
+        // Combined and/or (or has lower precedence)
+        assert_eq!(interp.eval("1 and 2 or 0").unwrap().to_string(), "2");
+        assert_eq!(interp.eval("0 and 2 or 3").unwrap().to_string(), "3");
+        assert_eq!(interp.eval("1 or 2 and 0").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("0 or 2 and 3").unwrap().to_string(), "3");
+    }
+
+    #[test]
+    fn test_and_or_with_not() {
+        let mut interp = Interpreter::new();
+        // not has higher precedence than and/or
+        assert_eq!(interp.eval("not 0 and 1").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("not 1 and 1").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("not 0 or 0").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("not 1 or 1").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_real_world_xacro_patterns() {
+        let mut interp = Interpreter::new();
+        // Pattern: check non-empty and non-default value
+        interp.eval("robot_ns = 'my_robot'").unwrap();
+        assert_eq!(
+            interp.eval("(robot_ns != '') and (robot_ns != '/')").unwrap().to_string(),
+            "1"
+        );
+
+        interp.eval("robot_ns = ''").unwrap();
+        assert_eq!(
+            interp.eval("(robot_ns != '') and (robot_ns != '/')").unwrap().to_string(),
+            "0"
+        );
+
+        // Pattern: match any of several values
+        interp.eval("x = 'a'").unwrap();
+        assert_eq!(
+            interp.eval("(x == 'a') or (x == 'b')").unwrap().to_string(),
+            "1"
+        );
+
+        interp.eval("x = 'c'").unwrap();
+        assert_eq!(
+            interp.eval("(x == 'a') or (x == 'b')").unwrap().to_string(),
+            "0"
+        );
+
+        // Pattern: multiple boolean flags
+        interp.eval("use_fake_hardware = 1").unwrap();
+        interp.eval("sim_ignition = 0").unwrap();
+        interp.eval("sim_isaac = 0").unwrap();
+        assert_eq!(
+            interp.eval("use_fake_hardware or sim_ignition or sim_isaac").unwrap().to_string(),
+            "1"
+        );
     }
 }

@@ -18,7 +18,7 @@ impl PartialEq for Env {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Number(f64),
     Lambda {
@@ -44,6 +44,61 @@ pub enum Value {
         receiver: Box<Value>,
         method: String,
     },
+}
+
+/// Compare two sets as multisets (order-independent, counts matter).
+///
+/// Sets are backed by Vec which can contain duplicates due to imperfect
+/// deduplication (e.g., set([1, 1.0]) may have duplicates). This handles
+/// both true sets and multisets correctly.
+///
+/// Time complexity: O(n²), but avoids expensive clones and memory shifts.
+fn multiset_equal(a: &[Value], b: &[Value]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    // Use boolean flags to track matched elements (avoids cloning Values)
+    let mut b_matched = vec![false; b.len()];
+    for item_a in a {
+        if let Some(pos) = b.iter().enumerate().position(|(i, item_b)| !b_matched[i] && item_a == item_b) {
+            b_matched[pos] = true;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            // Cross-type equality: Var and StringLit are semantically equivalent
+            (Value::Var(a), Value::StringLit(b)) | (Value::StringLit(a), Value::Var(b)) => a == b,
+
+            // Lambda comparisons always return false (no identity tracking)
+            // Direct lambda == lambda throws TypeError in eval_expr, so this only
+            // affects lambdas inside collections (e.g., [lambda x: 1] == [lambda x: 2])
+            (Value::Lambda { .. }, _) | (_, Value::Lambda { .. }) => false,
+
+            // Same-type comparisons
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::Var(a), Value::Var(b)) => a == b,
+            (Value::StringLit(a), Value::StringLit(b)) => a == b,
+            (Value::List(a), Value::List(b)) => a == b,
+            (Value::Tuple(a), Value::Tuple(b)) => a == b,
+            (Value::Set(a), Value::Set(b)) => multiset_equal(a, b),
+            (Value::Dict(a), Value::Dict(b)) => a == b,
+            (Value::Builtin { name: a, .. }, Value::Builtin { name: b, .. }) => a == b,
+            (Value::BuiltinValue { name: a, .. }, Value::BuiltinValue { name: b, .. }) => a == b,
+            (Value::BoundMethod { receiver: a_rec, method: a_meth },
+             Value::BoundMethod { receiver: b_rec, method: b_meth }) => {
+                a_meth == b_meth && a_rec == b_rec
+            }
+
+            // Different types are never equal
+            (_, _) => false,
+        }
+    }
 }
 
 impl std::fmt::Display for Value {
@@ -802,24 +857,16 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
                     }
                     _ => return Err(EvalError::TypeError),
                 },
-                BinOp::Eq => match (lval, rval) {
-                    (Value::Number(a), Value::Number(b)) => {
-                        Value::Number(if a == b { 1.0 } else { 0.0 })
+                BinOp::Eq | BinOp::Ne => {
+                    // Direct lambda comparisons throw TypeError
+                    if matches!(lval, Value::Lambda { .. }) || matches!(rval, Value::Lambda { .. }) {
+                        return Err(EvalError::TypeError);
                     }
-                    (Value::StringLit(a), Value::StringLit(b)) => {
-                        Value::Number(if a == b { 1.0 } else { 0.0 })
-                    }
-                    _ => return Err(EvalError::TypeError),
-                },
-                BinOp::Ne => match (lval, rval) {
-                    (Value::Number(a), Value::Number(b)) => {
-                        Value::Number(if a != b { 1.0 } else { 0.0 })
-                    }
-                    (Value::StringLit(a), Value::StringLit(b)) => {
-                        Value::Number(if a != b { 1.0 } else { 0.0 })
-                    }
-                    _ => return Err(EvalError::TypeError),
-                },
+                    // Use PartialEq for all other comparisons (including mixed types)
+                    let are_equal = lval == rval;
+                    let result = if op == BinOp::Eq { are_equal } else { !are_equal };
+                    Value::Number(if result { 1.0 } else { 0.0 })
+                }
                 BinOp::And | BinOp::Or => {
                     unreachable!("And/Or handled above with short-circuit evaluation")
                 }

@@ -646,4 +646,245 @@ mod test {
             "1"
         );
     }
+
+    #[test]
+    fn test_mixed_type_eq_returns_false() {
+        let mut interp = Interpreter::new();
+        // Number == String should return False (0)
+        assert_eq!(interp.eval("1.0 == '/'").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("42 == 'hello'").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("0 == ''").unwrap().to_string(), "0");
+
+        // With variables
+        interp.eval("x = 1.0").unwrap();
+        assert_eq!(interp.eval("x == '/'").unwrap().to_string(), "0");
+
+        interp.eval("s = '/'").unwrap();
+        assert_eq!(interp.eval("1.0 == s").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_mixed_type_ne_returns_true() {
+        let mut interp = Interpreter::new();
+        // Number != String should return True (1)
+        assert_eq!(interp.eval("1.0 != '/'").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("42 != 'hello'").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("0 != ''").unwrap().to_string(), "1");
+
+        // With variables
+        interp.eval("x = 1.0").unwrap();
+        assert_eq!(interp.eval("x != '/'").unwrap().to_string(), "1");
+
+        interp.eval("s = '/'").unwrap();
+        assert_eq!(interp.eval("1.0 != s").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_mixed_type_comparison_commutative() {
+        let mut interp = Interpreter::new();
+        // String == Number should also return False (commutative)
+        interp.eval("s = '/'").unwrap();
+        assert_eq!(interp.eval("s == 1.0").unwrap().to_string(), "0");
+
+        // String != Number should return True
+        assert_eq!(interp.eval("s != 1.0").unwrap().to_string(), "1");
+
+        // Both orderings should give same result
+        interp.eval("num = 42").unwrap();
+        interp.eval("str = 'test'").unwrap();
+        assert_eq!(interp.eval("num == str").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("str == num").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("num != str").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("str != num").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_mixed_type_falsy_values() {
+        let mut interp = Interpreter::new();
+        // Empty string and 0 are both "falsy" but not equal
+        interp.eval("empty = ''").unwrap();
+        assert_eq!(interp.eval("empty != 0").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("empty == 0").unwrap().to_string(), "0");
+
+        // This is important: different types are never equal
+        // even if both would be falsy in boolean context
+        assert_eq!(interp.eval("'' == 0").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("0 == ''").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_mixed_type_in_boolean_expressions() {
+        let mut interp = Interpreter::new();
+        // Check if prefix equals any of several string values
+        // When prefix is a number (e.g. True → 1.0), all comparisons should be False
+        interp.eval("prefix = 1.0").unwrap();
+
+        // Each individual comparison returns False (0)
+        assert_eq!(interp.eval("prefix == '/'").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("prefix == ''").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("prefix == ' '").unwrap().to_string(), "0");
+
+        // Overall OR expression should be False (0)
+        assert_eq!(
+            interp.eval("prefix == '/' or prefix == '' or prefix == ' '").unwrap().to_string(),
+            "0"
+        );
+    }
+
+    #[test]
+    fn test_same_type_comparisons_still_work() {
+        let mut interp = Interpreter::new();
+        // Ensure same-type comparisons are unaffected
+
+        // Number == Number
+        assert_eq!(interp.eval("1.0 == 1.0").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("1.0 != 2.0").unwrap().to_string(), "1");
+
+        // String == String
+        interp.eval("s1 = 'hello'").unwrap();
+        interp.eval("s2 = 'hello'").unwrap();
+        assert_eq!(interp.eval("s1 == s2").unwrap().to_string(), "1");
+
+        interp.eval("s3 = 'world'").unwrap();
+        assert_eq!(interp.eval("s1 != s3").unwrap().to_string(), "1");
+
+        // Empty strings
+        assert_eq!(interp.eval("'' == ''").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_collection_equality() {
+        let mut interp = Interpreter::new();
+
+        // Lists
+        assert_eq!(interp.eval("[1, 2] == [1, 2]").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("[1, 2] != [1, 3]").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("[] == []").unwrap().to_string(), "1");
+
+        // Tuples
+        assert_eq!(interp.eval("(1, 2) == (1, 2)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("(1, 2) != (1, 3)").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("() == ()").unwrap().to_string(), "1");
+
+        // Dicts
+        assert_eq!(interp.eval("{'a': 1} == {'a': 1}").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("{'a': 1} != {'a': 2}").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("{} == {}").unwrap().to_string(), "1");
+
+        // Sets
+        assert_eq!(interp.eval("set([1, 2]) == set([1, 2])").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("set([1, 2]) == set([2, 1])").unwrap().to_string(), "1"); // Order shouldn't matter
+        assert_eq!(interp.eval("set([1, 2]) != set([1, 3])").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("set() == set()").unwrap().to_string(), "1");
+
+        // Mixed-type (collection vs non-collection) should be False
+        assert_eq!(interp.eval("[1, 2] == 5").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("[1, 2] != 5").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("set([1, 2]) == 5").unwrap().to_string(), "0");
+    }
+
+    #[test]
+    fn test_set_equality_with_duplicates() {
+        let mut interp = Interpreter::new();
+
+        // Sets deduplicate properly, so duplicates in input don't affect equality.
+        // Our multiset comparison handles the edge case where Value::Set might
+        // contain duplicates (though builtin_set_value should prevent this).
+
+        // Both deduplicate to {1, 2} -> equal
+        assert_eq!(interp.eval("set([1, 1, 2]) == set([1, 2, 2])").unwrap().to_string(), "1");
+
+        // Different elements after dedup -> not equal
+        assert_eq!(interp.eval("set([1, 2]) == set([1, 3])").unwrap().to_string(), "0");
+
+        // Same elements, order doesn't matter -> equal
+        assert_eq!(interp.eval("set([2, 1]) == set([1, 2])").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_lambda_comparison() {
+        let mut interp = Interpreter::new();
+
+        // Lambda comparisons throw TypeError - they require identity tracking
+        // that we don't have (would need Rc wrappers + ptr_eq).
+        interp.eval("f1 = lambda x: 1").unwrap();
+        interp.eval("f2 = lambda x: 1").unwrap();
+
+        // All lambda comparisons throw TypeError
+        assert!(matches!(
+            interp.eval("f1 == f2"),
+            Err(crate::EvalError::TypeError)
+        ));
+
+        assert!(matches!(
+            interp.eval("f1 == f1"),
+            Err(crate::EvalError::TypeError)
+        ));
+
+        assert!(matches!(
+            interp.eval("f1 != f2"),
+            Err(crate::EvalError::TypeError)
+        ));
+    }
+
+    #[test]
+    fn test_builtin_comparison() {
+        let mut interp = Interpreter::new();
+
+        // Builtins can be compared (by name)
+        interp.eval("f1 = len").unwrap();
+        interp.eval("f2 = len").unwrap();
+
+        assert_eq!(interp.eval("f1 == f2").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("f1 != f2").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("len == sum").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("len != sum").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_var_stringlit_cross_type_equality() {
+        let mut interp = Interpreter::new();
+
+        // Dict iteration creates Var values, not StringLit
+        interp.eval("d = {'a': 1, 'b': 2}").unwrap();
+        interp.eval("keys = [k for k in d]").unwrap();
+
+        // Var and StringLit should compare as equal when content matches
+        assert_eq!(interp.eval("keys[0] == 'a'").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("keys[1] == 'b'").unwrap().to_string(), "1");
+
+        // List of Var should equal list of StringLit
+        assert_eq!(interp.eval("keys == ['a', 'b']").unwrap().to_string(), "1");
+
+        // Reverse comparison should also work
+        assert_eq!(interp.eval("'a' == keys[0]").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_lambda_equality_behavior() {
+        let mut interp = Interpreter::new();
+
+        // Direct lambda == lambda still throws TypeError (caught in eval_expr)
+        let result = interp.eval("(lambda x: 1) == (lambda x: 1)");
+        assert!(matches!(result, Err(EvalError::TypeError)));
+
+        // TODO: Lambdas in collections always compare as false (trade-off, would require object id tracking)
+        // Even though these are syntactically identical, we can't track identity
+        assert_eq!(
+            interp.eval("[lambda x: 1] == [lambda x: 1]").unwrap().to_string(),
+            "0"
+        );
+
+        // Different lambdas in collections also return false
+        assert_eq!(
+            interp.eval("[lambda x: 1] == [lambda x: 2]").unwrap().to_string(),
+            "0"
+        );
+
+        // Lists with mixed content: lambdas make them unequal
+        assert_eq!(
+            interp.eval("['a', lambda x: 1] == ['a', lambda x: 1]").unwrap().to_string(),
+            "0"
+        );
+    }
 }

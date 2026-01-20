@@ -97,19 +97,22 @@ mod test {
         assert_eq!(interp.eval("min(1, 2, 3)").unwrap().to_string(), "1");
         assert_eq!(interp.eval("int(1.5)").unwrap().to_string(), "1");
         assert_eq!(interp.eval("float(1)").unwrap().to_string(), "1");
-        assert_eq!(interp.eval("str(1)").unwrap().to_string(), "1");
-        assert_eq!(interp.eval("str(1.5)").unwrap().to_string(), "1.5");
+        // str() returns StringLit, which now outputs quoted for valid Python syntax
+        assert_eq!(interp.eval("str(1)").unwrap().to_string(), "'1'");
+        assert_eq!(interp.eval("str(1.5)").unwrap().to_string(), "'1.5'");
         assert_eq!(
             interp.eval("str([1, 2, 3])").unwrap().to_string(),
-            "[1, 2, 3]"
+            "'[1, 2, 3]'"
         );
+        // str() converts dict to StringLit, which then escapes quotes
         assert_eq!(
             interp.eval("str({'a': 1, 'b': 2})").unwrap().to_string(),
-            "{a: 1, b: 2}"
+            "'{\\'a\\': 1, \\'b\\': 2}'"
         );
+        // dict() returns Dict directly, which quotes string keys
         assert_eq!(
             interp.eval("dict({'a': 1, 'b': 2})").unwrap().to_string(),
-            "{a: 1, b: 2}"
+            "{'a': 1, 'b': 2}"
         );
         assert_eq!(
             interp.eval("list([1, 2, 3])").unwrap().to_string(),
@@ -142,9 +145,10 @@ mod test {
     fn test_dict_comp() {
         let mut interp = Interpreter::new();
         interp.eval("x = [1, 2, 3, 4, 5]").unwrap();
+        // Dict keys are always quoted (even numeric-looking ones) for valid Python syntax
         assert_eq!(
             interp.eval("{y: y * 2 for y in x}").unwrap().to_string(),
-            "{1: 2, 2: 4, 3: 6, 4: 8, 5: 10}"
+            "{'1': 2, '2': 4, '3': 6, '4': 8, '5': 10}"
         );
     }
 
@@ -159,7 +163,7 @@ mod test {
                 .eval("'big' if x > y else 'small'")
                 .unwrap()
                 .to_string(),
-            "small"
+            "'small'"
         );
     }
 
@@ -177,12 +181,14 @@ mod test {
     #[test]
     fn test_string_method() {
         let mut interp = Interpreter::new();
-        assert_eq!(interp.eval("'hello'.upper()").unwrap().to_string(), "HELLO");
-        assert_eq!(interp.eval("'Hello'.lower()").unwrap().to_string(), "hello");
+        // String methods return StringLit, which now quotes output
+        assert_eq!(interp.eval("'hello'.upper()").unwrap().to_string(), "'HELLO'");
+        assert_eq!(interp.eval("'Hello'.lower()").unwrap().to_string(), "'hello'");
         interp.eval("x = 'a\nb\nc'").unwrap();
+        // splitlines() returns a list of StringLits, which are now quoted
         assert_eq!(
             interp.eval("x.splitlines()").unwrap().to_string(),
-            "[a, b, c]"
+            "['a', 'b', 'c']"
         );
     }
 
@@ -206,12 +212,14 @@ mod test {
         assert_eq!(interp.eval("x.get('a')").unwrap().to_string(), "1");
         assert_eq!(interp.eval("x.get('c', 0)").unwrap().to_string(), "0");
         interp.eval("x = {'a': 1, 'b': 2}").unwrap();
+        // items() returns list of tuples with StringLit keys
         assert_eq!(
             interp.eval("x.items()").unwrap().to_string(),
-            "[(a, 1), (b, 2)]"
+            "[('a', 1), ('b', 2)]"
         );
         interp.eval("x = {'a': 1, 'b': 2}").unwrap();
-        assert_eq!(interp.eval("x.keys()").unwrap().to_string(), "[a, b]");
+        // keys() returns list of StringLits
+        assert_eq!(interp.eval("x.keys()").unwrap().to_string(), "['a', 'b']");
         interp.eval("x = {'a': 1, 'b': 2}").unwrap();
         assert_eq!(interp.eval("x.values()").unwrap().to_string(), "[1, 2]");
     }
@@ -219,19 +227,20 @@ mod test {
     #[test]
     fn test_strings_non_empty_single_quote() {
         let interp = Interpreter::new();
+        // StringLit now outputs quoted strings for valid Python syntax
         assert_eq!(
             interp
                 .eval_with_context("'a'", &Default::default())
                 .unwrap()
                 .to_string(),
-            "a"
+            "'a'"
         );
         assert_eq!(
             interp
                 .eval_with_context("'hello'", &Default::default())
                 .unwrap()
                 .to_string(),
-            "hello"
+            "'hello'"
         );
         assert!(interp.eval_boolean("'a' == 'a'").unwrap());
     }
@@ -239,12 +248,13 @@ mod test {
     #[test]
     fn test_strings_single_quote_empty() {
         let interp = Interpreter::new();
+        // Empty string now outputs as '' for valid Python syntax
         assert_eq!(
             interp
                 .eval_with_context("''", &Default::default())
                 .unwrap()
                 .to_string(),
-            ""
+            "''"
         );
         assert!(interp.eval_boolean("'' == ''").unwrap());
         assert_eq!(
@@ -577,15 +587,15 @@ mod test {
     #[test]
     fn test_and_or_with_strings() {
         let mut interp = Interpreter::new();
-        // And with strings
-        assert_eq!(interp.eval("'hello' and 'world'").unwrap().to_string(), "world");
-        assert_eq!(interp.eval("'' and 'world'").unwrap().to_string(), "");
-        assert_eq!(interp.eval("'hello' and ''").unwrap().to_string(), "");
+        // And with strings - StringLits now output quoted
+        assert_eq!(interp.eval("'hello' and 'world'").unwrap().to_string(), "'world'");
+        assert_eq!(interp.eval("'' and 'world'").unwrap().to_string(), "''");
+        assert_eq!(interp.eval("'hello' and ''").unwrap().to_string(), "''");
 
-        // Or with strings
-        assert_eq!(interp.eval("'hello' or 'world'").unwrap().to_string(), "hello");
-        assert_eq!(interp.eval("'' or 'world'").unwrap().to_string(), "world");
-        assert_eq!(interp.eval("'hello' or ''").unwrap().to_string(), "hello");
+        // Or with strings - StringLits now output quoted
+        assert_eq!(interp.eval("'hello' or 'world'").unwrap().to_string(), "'hello'");
+        assert_eq!(interp.eval("'' or 'world'").unwrap().to_string(), "'world'");
+        assert_eq!(interp.eval("'hello' or ''").unwrap().to_string(), "'hello'");
     }
 
     #[test]
@@ -858,6 +868,200 @@ mod test {
 
         // Reverse comparison should also work
         assert_eq!(interp.eval("'a' == keys[0]").unwrap().to_string(), "1");
+    }
+
+    #[test]
+    fn test_dict_display_round_trip_string_keys() {
+        let mut interp = Interpreter::new();
+        let input = "{'key': 'value'}";
+        let parsed = interp.eval(input).unwrap();
+        let output = parsed.to_string();
+
+        // Should be able to parse the output back
+        let reparsed = interp.eval(&output).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn test_dict_display_round_trip_nested() {
+        let mut interp = Interpreter::new();
+        let input = "{'outer': {'inner': 'value', 'num': 42}}";
+        let parsed = interp.eval(input).unwrap();
+        let output = parsed.to_string();
+
+        // Output should have quotes
+        assert!(output.contains("'outer'"));
+        assert!(output.contains("'inner'"));
+        assert!(output.contains("'value'"));
+
+        // Should be able to parse back
+        let reparsed = interp.eval(&output).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn test_dict_display_mixed_value_types() {
+        let mut interp = Interpreter::new();
+        let input = "{'str': 'hello', 'num': 42, 'float': 3.14}";
+        let parsed = interp.eval(input).unwrap();
+        let output = parsed.to_string();
+
+        // String values should be quoted, numbers should not
+        assert!(output.contains("'str': 'hello'"));
+        assert!(output.contains("'num': 42"));
+        assert!(output.contains("'float': 3.14"));
+
+        let reparsed = interp.eval(&output).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn test_list_display_round_trip() {
+        let mut interp = Interpreter::new();
+        let input = "['a', 'b', 42, 3.14]";
+        let parsed = interp.eval(input).unwrap();
+        let output = parsed.to_string();
+
+        // Should be able to parse back
+        let reparsed = interp.eval(&output).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn test_dict_display_numeric_string_keys() {
+        let mut interp = Interpreter::new();
+        // Dict keys are always strings in pyisheval - always quoted
+        let input = "{'1': 'one', '2': 'two', '3.5': 'three-point-five'}";
+        let parsed = interp.eval(input).unwrap();
+        let output = parsed.to_string();
+
+        // All string keys should be quoted (even numeric-looking ones)
+        assert!(output.contains("'1': 'one'"));
+        assert!(output.contains("'2': 'two'"));
+        assert!(output.contains("'3.5': 'three-point-five'"));
+
+        let reparsed = interp.eval(&output).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn test_dict_display_round_trip_simple() {
+        let mut interp = Interpreter::new();
+        // Simple round-trip test without special characters
+        let input = "{'name': 'test', 'count': 42}";
+        let parsed = interp.eval(input).unwrap();
+        let output = parsed.to_string();
+
+        // Should be able to reparse the output
+        let reparsed = interp.eval(&output).unwrap();
+        assert_eq!(parsed, reparsed);
+
+        // Output should contain quoted keys
+        assert!(output.contains("'name'"));
+        assert!(output.contains("'count'"));
+    }
+
+    #[test]
+    fn test_str_on_string_literal() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        // str() should extract raw value without Display's quotes
+        let result = interp.eval("str('36_11')").unwrap();
+        if let Value::StringLit(s) = result {
+            assert_eq!(s, "36_11"); // Underlying value has no extra quotes
+        } else {
+            panic!("Expected StringLit");
+        }
+    }
+
+    #[test]
+    fn test_str_on_variable() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        interp.eval("x = 'hello'").unwrap();
+        let result = interp.eval("str(x)").unwrap();
+        if let Value::StringLit(s) = result {
+            assert_eq!(s, "hello");
+        } else {
+            panic!("Expected StringLit");
+        }
+    }
+
+    #[test]
+    fn test_str_on_number() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        let result = interp.eval("str(42.5)").unwrap();
+        if let Value::StringLit(s) = result {
+            assert_eq!(s, "42.5");
+        } else {
+            panic!("Expected StringLit");
+        }
+    }
+
+    #[test]
+    fn test_str_on_list() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        let result = interp.eval("str([1, 2, 3])").unwrap();
+        if let Value::StringLit(s) = result {
+            // List's Display output includes quotes for string elements
+            assert_eq!(s, "[1, 2, 3]");
+        } else {
+            panic!("Expected StringLit");
+        }
+    }
+
+    #[test]
+    fn test_str_on_dict() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        let result = interp.eval("str({'a': 1})").unwrap();
+        if let Value::StringLit(s) = result {
+            // Dict's Display output includes quoted keys
+            assert_eq!(s, "{'a': 1}");
+        } else {
+            panic!("Expected StringLit");
+        }
+    }
+
+    #[test]
+    fn test_str_empty() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        let result = interp.eval("str()").unwrap();
+        if let Value::StringLit(s) = result {
+            assert_eq!(s, "");
+        } else {
+            panic!("Expected StringLit");
+        }
+    }
+
+    #[test]
+    fn test_str_in_expression() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        interp.eval("family = '36_11'").unwrap();
+
+        // str() should not add extra quotes that would interfere with string operations
+        // (The xacro use case - str() should produce clean values for further processing)
+        let result = interp.eval("str(family)").unwrap();
+        assert_eq!(result, Value::StringLit("36_11".to_string()));
+    }
+
+    #[test]
+    fn test_str_with_replace_method() {
+        use crate::Value;
+        let mut interp = Interpreter::new();
+        interp.eval("family = '36_11'").unwrap();
+
+        // The xacro use case: str(value).replace()
+        let result = interp.eval("str(family).replace('_', '-')").unwrap();
+        if let Value::StringLit(s) = result {
+            assert_eq!(s, "36-11");  // Should work without quote pollution
+        } else {
+            panic!("Expected StringLit");
+        }
     }
 
     #[test]

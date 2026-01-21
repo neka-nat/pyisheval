@@ -242,6 +242,8 @@ fn comparison(input: &str) -> IResult<&str, Expr> {
 
     loop {
         let (next_input, opt_op) = opt(alt((
+            tag("not in"),
+            tag("in"),
             tag(">="),
             tag(">"),
             tag("=="),
@@ -251,7 +253,21 @@ fn comparison(input: &str) -> IResult<&str, Expr> {
         )))(input)?;
 
         if let Some(op_str) = opt_op {
+            // For "in" and "not in", check word boundary to avoid splitting identifiers
+            if op_str == "in" || op_str == "not in" {
+                let is_identifier_part = next_input
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_alphanumeric() || c == '_');
+
+                if is_identifier_part {
+                    break;
+                }
+            }
+
             let op = match op_str {
+                "not in" => BinOp::NotIn,
+                "in" => BinOp::In,
                 ">=" => BinOp::Ge,
                 ">" => BinOp::Gt,
                 "==" => BinOp::Eq,

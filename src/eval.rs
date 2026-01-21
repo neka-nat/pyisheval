@@ -776,6 +776,36 @@ impl Interpreter {
     }
 }
 
+/// Check if needle is a member of haystack (for `in` and `not in` operators)
+fn check_membership(needle: &Value, haystack: &Value) -> Result<bool, EvalError> {
+    match haystack {
+        // String: substring search
+        Value::StringLit(s) | Value::Var(s) => {
+            match needle {
+                Value::StringLit(sub) | Value::Var(sub) => Ok(s.contains(sub.as_str())),
+                _ => Err(EvalError::TypeError),
+            }
+        }
+
+        // List/Tuple/Set: element equality
+        Value::List(items) | Value::Tuple(items) | Value::Set(items) => {
+            Ok(items.iter().any(|item| item == needle))
+        }
+
+        // Dict: key presence (consistent with extract_key: converts numbers to strings)
+        Value::Dict(map) => {
+            match needle {
+                Value::StringLit(k) | Value::Var(k) => Ok(map.contains_key(k)),
+                Value::Number(n) => Ok(map.contains_key(&n.to_string())),
+                // Other types cannot be dict keys
+                _ => Ok(false),
+            }
+        }
+
+        _ => Err(EvalError::TypeError),
+    }
+}
+
 pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell<Env>>), EvalError> {
     match expr {
         Expr::Number(n) => Ok((Value::Number(n), env)),
@@ -907,6 +937,11 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
                     // Use PartialEq for all other comparisons (including mixed types)
                     let are_equal = lval == rval;
                     let result = if op == BinOp::Eq { are_equal } else { !are_equal };
+                    Value::Number(if result { 1.0 } else { 0.0 })
+                }
+                BinOp::In | BinOp::NotIn => {
+                    let is_member = check_membership(&lval, &rval)?;
+                    let result = if op == BinOp::In { is_member } else { !is_member };
                     Value::Number(if result { 1.0 } else { 0.0 })
                 }
                 BinOp::And | BinOp::Or => {

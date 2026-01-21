@@ -76,6 +76,8 @@ pub enum BinOp {
     Ne,
     And,
     Or,
+    In,
+    NotIn,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,6 +111,8 @@ impl fmt::Display for BinOp {
             BinOp::Ne => write!(f, "!="),
             BinOp::And => write!(f, "and"),
             BinOp::Or => write!(f, "or"),
+            BinOp::In => write!(f, "in"),
+            BinOp::NotIn => write!(f, "not in"),
         }
     }
 }

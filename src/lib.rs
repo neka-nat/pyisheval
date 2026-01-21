@@ -1091,4 +1091,204 @@ mod test {
             "0"
         );
     }
+
+    // ===== in / not in operator tests =====
+
+    #[test]
+    fn test_in_string_basic() {
+        let mut interp = Interpreter::new();
+        // Single character search
+        assert_eq!(interp.eval("'x' in 'xyz'").unwrap(), Value::Number(1.0));
+        // Substring search
+        assert_eq!(interp.eval("'ab' in 'xabz'").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("'az' in 'baz'").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("'hello' in 'say hello world'").unwrap(), Value::Number(1.0));
+        // Not found
+        assert_eq!(interp.eval("'q' in 'xyz'").unwrap(), Value::Number(0.0));
+        assert_eq!(interp.eval("'za' in 'baz'").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_in_string_empty() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("'' in 'anything'").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("'' in ''").unwrap(), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_in_list() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("2 in [1, 2, 3]").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("4 in [1, 2, 3]").unwrap(), Value::Number(0.0));
+        assert_eq!(interp.eval("'a' in ['a', 'b']").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("1 in []").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_in_tuple() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("2 in (1, 2, 3)").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("4 in (1, 2, 3)").unwrap(), Value::Number(0.0));
+        assert_eq!(interp.eval("1 in ()").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_in_set() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("2 in {1, 2, 3}").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("4 in {1, 2, 3}").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_in_dict_keys() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("'a' in {'a': 1, 'b': 2}").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("'c' in {'a': 1, 'b': 2}").unwrap(), Value::Number(0.0));
+        // Values are NOT checked, only keys
+        assert_eq!(interp.eval("1 in {'a': 1}").unwrap(), Value::Number(0.0));
+        assert_eq!(interp.eval("'a' in {}").unwrap(), Value::Number(0.0));
+        // Number keys are converted to strings (consistent with extract_key for indexing)
+        assert_eq!(interp.eval("2 in {'2': 'a'}").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("3 in {'2': 'a'}").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_not_in_string() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("'q' not in 'xyz'").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("'x' not in 'xyz'").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_not_in_list() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("4 not in [1, 2, 3]").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("2 not in [1, 2, 3]").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_in_type_error_non_iterable() {
+        let mut interp = Interpreter::new();
+        // Cannot check membership in a number (haystack not iterable)
+        assert!(matches!(
+            interp.eval("2 in 42"),
+            Err(EvalError::TypeError)
+        ));
+        assert!(matches!(
+            interp.eval("'x' in 123"),
+            Err(EvalError::TypeError)
+        ));
+        assert!(matches!(
+            interp.eval("3 in 7"),
+            Err(EvalError::TypeError)
+        ));
+        assert!(matches!(
+            interp.eval("3 in 9"),
+            Err(EvalError::TypeError)
+        ));
+    }
+
+    #[test]
+    fn test_in_string_requires_string_needle() {
+        let mut interp = Interpreter::new();
+        // Python: 'in <string>' requires string as left operand
+        assert!(matches!(
+            interp.eval("2 in 'foo'"),
+            Err(EvalError::TypeError)
+        ));
+        assert!(matches!(
+            interp.eval("2 in '2'"),
+            Err(EvalError::TypeError)
+        ));
+        // String needle is ok
+        assert_eq!(interp.eval("'2' in '123'").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("'x' in 'xyz'").unwrap(), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_in_type_mismatch_returns_false() {
+        let mut interp = Interpreter::new();
+        // String not in list of numbers -> false
+        assert_eq!(interp.eval("'x' in [1, 2, 3]").unwrap(), Value::Number(0.0));
+        // Number not in list of strings -> false
+        assert_eq!(interp.eval("1 in ['a', 'b']").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn test_in_with_variables() {
+        let mut interp = Interpreter::new();
+        interp.eval("x = 'hello'").unwrap();
+        interp.eval("items = ['hello', 'world']").unwrap();
+        assert_eq!(interp.eval("x in items").unwrap(), Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_in_with_logical_operators() {
+        let mut interp = Interpreter::new();
+        // Precedence: in binds tighter than and/or
+        assert_eq!(
+            interp.eval("2 in [1, 2, 3] and 'x' in 'xyz'").unwrap(),
+            Value::Number(1.0)
+        );
+        assert_eq!(
+            interp.eval("4 in [1, 2, 3] or 'x' in 'xyz'").unwrap(),
+            Value::Number(1.0)
+        );
+    }
+
+    #[test]
+    fn test_comprehension_still_works_with_in() {
+        let mut interp = Interpreter::new();
+        // Ensure comprehensions didn't break with "in" operator addition
+        let result = interp.eval("[x for x in [1, 2, 3]]").unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Number(1.0),
+            Value::Number(2.0),
+            Value::Number(3.0),
+        ]));
+    }
+
+    #[test]
+    fn test_identifier_boundary_not_split() {
+        let mut interp = Interpreter::new();
+        // Identifiers like "index" should not be split into "in" + "dex"
+        interp.eval("index = 5").unwrap();
+        interp.eval("integer = 10").unwrap();
+        interp.eval("notice = 'warning'").unwrap();
+
+        assert_eq!(interp.eval("index").unwrap(), Value::Number(5.0));
+        assert_eq!(interp.eval("integer").unwrap(), Value::Number(10.0));
+        assert_eq!(interp.eval("notice").unwrap(), Value::StringLit("warning".to_string()));
+    }
+
+    #[test]
+    fn test_not_in_is_compound_operator() {
+        let mut interp = Interpreter::new();
+        // "not in" is a single compound operator, not "not (x in y)"
+        // These should give same result but parsed differently
+
+        // Compound: x not in y
+        let result1 = interp.eval("3 not in [1, 2]").unwrap();
+
+        // Prefix: not (x in y)
+        let result2 = interp.eval("not 3 in [1, 2]").unwrap();
+
+        // Both should be true (3 is not in [1, 2])
+        assert_eq!(result1, Value::Number(1.0));
+        assert_eq!(result2, Value::Number(1.0));
+    }
+
+    #[test]
+    fn test_in_xacro_patterns() {
+        let mut interp = Interpreter::new();
+        // Real-world xacro patterns from corpus
+
+        // Pattern: ${'-x' in snapto}
+        interp.eval("snapto = '-x'").unwrap();
+        assert_eq!(interp.eval("'-x' in snapto").unwrap(), Value::Number(1.0));
+
+        // Pattern: ${var not in [list]}
+        interp.eval("var = 'foo'").unwrap();
+        assert_eq!(interp.eval("var not in ['bar', 'baz']").unwrap(), Value::Number(1.0));
+    }
 }

@@ -4,7 +4,7 @@ use nom::error::ErrorKind;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
-    character::complete::{char, digit0, digit1, multispace0, one_of},
+    character::complete::{char, digit0, digit1, multispace0, multispace1, one_of},
     combinator::{opt, recognize},
     multi::separated_list0,
     sequence::{delimited, pair, preceded, tuple},
@@ -206,77 +206,31 @@ fn logical_and(input: &str) -> IResult<&str, Expr> {
 fn logical_not(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
 
-    // Check for "not" keyword
-    if let Ok((input_after_not, _)) = tag::<_, _, nom::error::Error<_>>("not")(input) {
-        // Boundary check: ensure "not" is not part of an identifier like "notfoo"
-        let is_identifier_part = input_after_not
-            .chars()
-            .next()
-            .map_or(false, |c| c.is_alphanumeric() || c == '_');
-
-        if !is_identifier_part {
-            // This is a standalone "not" operator
-            // It must be followed by an operand, which `preceded` will handle
-            let (input, operand) = preceded(multispace0, logical_not)(input_after_not)?;
-            return Ok((
-                input,
-                Expr::UnaryOp {
-                    op: UnOp::Not,
-                    operand: Box::new(operand),
-                },
-            ));
-        }
-        // Otherwise, it's part of an identifier (e.g., "notable"), so fall through
+    if let Ok((input_after_not, _)) = keyword(input, "not") {
+        let (input, operand) = preceded(multispace0, logical_not)(input_after_not)?;
+        return Ok((
+            input,
+            Expr::UnaryOp {
+                op: UnOp::Not,
+                operand: Box::new(operand),
+            },
+        ));
     }
 
-    // No "not" operator, parse comparison
     comparison(input)
 }
 
 //---------------------------------------------------------
-// comparison: additive ( (">=" | ">" | "==" | "!=" | "<=" | "<") additive )*
+// comparison: additive (comparison_operator additive)*
 //---------------------------------------------------------
 fn comparison(input: &str) -> IResult<&str, Expr> {
     let (input, mut expr) = additive(input)?;
     let (mut input, _) = multispace0(input)?;
 
     loop {
-        let (next_input, opt_op) = opt(alt((
-            tag("not in"),
-            tag("in"),
-            tag(">="),
-            tag(">"),
-            tag("=="),
-            tag("!="),
-            tag("<="),
-            tag("<"),
-        )))(input)?;
+        let (next_input, opt_op) = opt(comparison_operator)(input)?;
 
-        if let Some(op_str) = opt_op {
-            // For "in" and "not in", check word boundary to avoid splitting identifiers
-            if op_str == "in" || op_str == "not in" {
-                let is_identifier_part = next_input
-                    .chars()
-                    .next()
-                    .map_or(false, |c| c.is_alphanumeric() || c == '_');
-
-                if is_identifier_part {
-                    break;
-                }
-            }
-
-            let op = match op_str {
-                "not in" => BinOp::NotIn,
-                "in" => BinOp::In,
-                ">=" => BinOp::Ge,
-                ">" => BinOp::Gt,
-                "==" => BinOp::Eq,
-                "!=" => BinOp::Ne,
-                "<=" => BinOp::Le,
-                "<" => BinOp::Lt,
-                _ => unreachable!(),
-            };
-
+        if let Some(op) = opt_op {
             let (next_input2, _) = multispace0(next_input)?;
             let (next_input2, right) = additive(next_input2)?;
             expr = Expr::BinaryOp {
@@ -291,6 +245,50 @@ fn comparison(input: &str) -> IResult<&str, Expr> {
     }
 
     Ok((input, expr))
+}
+
+fn comparison_operator(input: &str) -> IResult<&str, BinOp> {
+    if let Ok((input_after_not, _)) = keyword(input, "not") {
+        let (input_after_space, _) = multispace1(input_after_not)?;
+        let (input_after_in, _) = keyword(input_after_space, "in")?;
+        return Ok((input_after_in, BinOp::NotIn));
+    }
+
+    if let Ok((input_after_in, _)) = keyword(input, "in") {
+        return Ok((input_after_in, BinOp::In));
+    }
+
+    let (input, op_str) = alt((
+        tag(">="),
+        tag(">"),
+        tag("=="),
+        tag("!="),
+        tag("<="),
+        tag("<"),
+    ))(input)?;
+
+    let op = match op_str {
+        ">=" => BinOp::Ge,
+        ">" => BinOp::Gt,
+        "==" => BinOp::Eq,
+        "!=" => BinOp::Ne,
+        "<=" => BinOp::Le,
+        "<" => BinOp::Lt,
+        _ => unreachable!(),
+    };
+    Ok((input, op))
+}
+
+fn keyword<'a>(input: &'a str, word: &str) -> IResult<&'a str, &'a str> {
+    let (input, matched) = tag(word)(input)?;
+    if input
+        .chars()
+        .next()
+        .map_or(false, |c| c.is_alphanumeric() || c == '_')
+    {
+        return Err(nom::Err::Error(Error::new(input, ErrorKind::Tag)));
+    }
+    Ok((input, matched))
 }
 
 //---------------------------------------------------------

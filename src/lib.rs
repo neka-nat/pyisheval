@@ -1167,6 +1167,13 @@ mod test {
     }
 
     #[test]
+    fn test_not_in_allows_whitespace_between_keywords() {
+        let mut interp = Interpreter::new();
+        assert_eq!(interp.eval("4 not   in [1, 2, 3]").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("2 not\nin [1, 2, 3]").unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
     fn test_in_type_error_non_iterable() {
         let mut interp = Interpreter::new();
         // Cannot check membership in a number (haystack not iterable)

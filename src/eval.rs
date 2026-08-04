@@ -855,6 +855,11 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
                             lv.extend(rv);
                             Value::List(lv)
                         }
+                        // 3) 文字列 + 文字列
+                        (Value::StringLit(mut left), Value::StringLit(right)) => {
+                            left.push_str(&right);
+                            Value::StringLit(left)
+                        }
                         // そのほかは TypeError
                         _ => return Err(EvalError::TypeError),
                     }

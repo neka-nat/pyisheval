@@ -18,6 +18,19 @@ mod test {
     }
 
     #[test]
+    fn test_string_concatenation() {
+        let mut interp = Interpreter::new();
+        assert_eq!(
+            interp.eval("'hello' + ' world'").unwrap(),
+            Value::StringLit("hello world".to_string())
+        );
+        assert_eq!(
+            interp.eval("'' + 'value'").unwrap(),
+            Value::StringLit("value".to_string())
+        );
+    }
+
+    #[test]
     fn test_variables() {
         let mut interp = Interpreter::new();
         interp.eval("x=10").unwrap();

@@ -25,8 +25,29 @@ mod test {
             Value::StringLit("hello world".to_string())
         );
         assert_eq!(
+            interp.eval("\"hello\" + \" world\"").unwrap(),
+            Value::StringLit("hello world".to_string())
+        );
+        assert_eq!(
+            interp.eval("'hello' + \" world\"").unwrap(),
+            Value::StringLit("hello world".to_string())
+        );
+        assert_eq!(
             interp.eval("'' + 'value'").unwrap(),
             Value::StringLit("value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_quote_delimiters() {
+        let mut interp = Interpreter::new();
+        assert_eq!(
+            interp.eval("\"it's valid\"").unwrap(),
+            Value::StringLit("it's valid".to_string())
+        );
+        assert_eq!(
+            interp.eval("'say \"hello\"'").unwrap(),
+            Value::StringLit("say \"hello\"".to_string())
         );
     }
 

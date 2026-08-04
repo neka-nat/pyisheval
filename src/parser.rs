@@ -849,12 +849,12 @@ fn number(input: &str) -> IResult<&str, Expr> {
 }
 
 //---------------------------------------------------------
-// string_lit: シングルクォート囲み
+// string_lit: シングルクォートまたはダブルクォート囲み
 //---------------------------------------------------------
 fn string_lit(input: &str) -> IResult<&str, Expr> {
-    let (input, _) = char('\'')(input)?;
-    let (input, s) = take_while(|c: char| c != '\'')(input)?;
-    let (input, _) = char('\'')(input)?;
+    let (input, delimiter) = one_of("'\"")(input)?;
+    let (input, s) = take_while(|c: char| c != delimiter)(input)?;
+    let (input, _) = char(delimiter)(input)?;
     Ok((input, Expr::StringLit(s.to_string())))
 }
 

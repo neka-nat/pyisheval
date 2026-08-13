@@ -26,6 +26,10 @@ pub enum Expr {
         func: Box<Expr>,
         args: Vec<Expr>,
     },
+    Attr {
+        object: Box<Expr>,
+        name: String,
+    },
     List(Vec<Expr>),
     Tuple(Vec<Expr>),
     Set(Vec<Expr>),

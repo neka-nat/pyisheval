@@ -427,11 +427,20 @@ fn primary(input: &str) -> IResult<&str, Expr> {
         call_or_var,
     ))(input)?;
 
-    // 次に配列アクセス [...]* を繰り返し
-    let (input, expr) = index_access(input, expr)?;
-
-    // さらにメソッド呼び出し .method(...) を繰り返しパース
-    let (input, expr) = method_chain(input, expr)?;
+    // 配列アクセス [...] / 属性・メソッド .name(...) を任意の順で繰り返しパース
+    // (d.a['b'].c のような混在チェーンを許す)
+    let mut input = input;
+    let mut expr = expr;
+    loop {
+        let before = input;
+        let (next, e) = index_access(input, expr)?;
+        let (next, e) = method_chain(next, e)?;
+        input = next;
+        expr = e;
+        if input.len() == before.len() {
+            break;
+        }
+    }
 
     Ok((input, expr))
 }
@@ -494,9 +503,13 @@ fn method_chain(mut input: &str, mut current: Expr) -> IResult<&str, Expr> {
                 args,
             };
         } else {
-            // obj.property のような形を許すなら別バリアントを返す実装など
-            // ここでは Pythonっぽく常にメソッド呼び出し想定なのでエラー
-            return Err(nom::Err::Failure(Error::new(input2, ErrorKind::Tag)));
+            // 括弧が無ければ属性アクセス (obj.name)。
+            // dict に対しては d.key == d['key'] として評価する
+            // (xacro の load_yaml が返す YamlDictWrapper 互換)
+            current = Expr::Attr {
+                object: Box::new(current),
+                name: method_name,
+            };
         }
 
         input = input2;

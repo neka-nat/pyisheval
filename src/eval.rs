@@ -200,6 +200,35 @@ fn builtin_abs(args: &[f64]) -> Result<f64, EvalError> {
     Ok(args[0].abs())
 }
 
+// math モジュール由来の関数 (xacro は math.* をそのまま公開するため互換で持つ)
+fn builtin_fabs(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("fabs".to_string()));
+    }
+    Ok(args[0].abs())
+}
+
+fn builtin_floor(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("floor".to_string()));
+    }
+    Ok(args[0].floor())
+}
+
+fn builtin_ceil(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("ceil".to_string()));
+    }
+    Ok(args[0].ceil())
+}
+
+fn builtin_sqrt(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("sqrt".to_string()));
+    }
+    Ok(args[0].sqrt())
+}
+
 fn builtin_max(args: &[f64]) -> Result<f64, EvalError> {
     if args.is_empty() {
         return Err(EvalError::ArgError("max".to_string()));
@@ -340,7 +369,9 @@ fn builtin_dict_value(args: &[Value]) -> Result<Value, EvalError> {
                     for item in lst {
                         match item {
                             Value::Tuple(tv) if tv.len() == 2 => {
-                                let k = tv[0].to_string(); // 簡易: to_string()
+                                // extract_key で正規化 (to_string() だと文字列キーが
+                                // クォート付き "'k'" で格納され d['k'] と一致しない)
+                                let k = extract_key(&tv[0])?;
                                 let v = tv[1].clone();
                                 new_map.insert(k, v);
                             }
@@ -572,6 +603,8 @@ pub enum EvalError {
     ArgError(String),
     #[error("Dict key error: keys must be identifiers")]
     DictKeyError,
+    #[error("Attribute error: {0}")]
+    AttrError(String),
 }
 
 impl Env {
@@ -617,6 +650,34 @@ impl Interpreter {
             Value::Builtin {
                 name: "abs".to_string(),
                 func: builtin_abs,
+            },
+        );
+        base_env.set(
+            "fabs",
+            Value::Builtin {
+                name: "fabs".to_string(),
+                func: builtin_fabs,
+            },
+        );
+        base_env.set(
+            "floor",
+            Value::Builtin {
+                name: "floor".to_string(),
+                func: builtin_floor,
+            },
+        );
+        base_env.set(
+            "ceil",
+            Value::Builtin {
+                name: "ceil".to_string(),
+                func: builtin_ceil,
+            },
+        );
+        base_env.set(
+            "sqrt",
+            Value::Builtin {
+                name: "sqrt".to_string(),
+                func: builtin_sqrt,
             },
         );
         base_env.set(
@@ -970,12 +1031,29 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
         }
         Expr::Call { func, args } => {
             let (fval, env) = eval_expr(*func, env)?;
+            // Python と同様に `name=expr` 形式の引数はキーワード引数として扱う
+            // (以前は Assign として評価され、呼び出し元の環境を書き換えつつ
+            //  位置引数扱いになっていた)
+            let mut pos_exprs: Vec<Expr> = Vec::new();
+            let mut kw_exprs: Vec<(String, Expr)> = Vec::new();
+            for a in args {
+                match a {
+                    Expr::Assign { name, expr } => kw_exprs.push((name, *expr)),
+                    other => pos_exprs.push(other),
+                }
+            }
             let mut arg_vals = Vec::new();
             let mut new_env = env.clone();
-            for a in args {
+            for a in pos_exprs {
                 let (av, e) = eval_expr(a, new_env)?;
                 new_env = e;
                 arg_vals.push(av);
+            }
+            let mut kw_vals: Vec<(String, Value)> = Vec::new();
+            for (k, a) in kw_exprs {
+                let (av, e) = eval_expr(a, new_env)?;
+                new_env = e;
+                kw_vals.push((k, av));
             }
 
             match fval {
@@ -984,8 +1062,8 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
                     body,
                     env: closure_env,
                 } => {
-                    // Lambdaは1引数想定
-                    if arg_vals.len() != 1 {
+                    // Lambdaは1引数想定 (キーワード引数は未対応)
+                    if !kw_vals.is_empty() || arg_vals.len() != 1 {
                         return Err(EvalError::LambdaCallError);
                     }
                     let arg_val = arg_vals.into_iter().next().unwrap();
@@ -995,7 +1073,10 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
                     let (res, _) = eval_expr(body, call_env)?;
                     Ok((res, new_env))
                 }
-                Value::Builtin { name: _, func } => {
+                Value::Builtin { name, func } => {
+                    if !kw_vals.is_empty() {
+                        return Err(EvalError::ArgError(name));
+                    }
                     let mut nums = Vec::new();
                     for v in arg_vals {
                         match v {
@@ -1007,7 +1088,27 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
                     Ok((Value::Number(res_num), new_env))
                 }
                 // lenなどValueベースの関数
-                Value::BuiltinValue { name: _, func } => {
+                Value::BuiltinValue { name, func } => {
+                    if !kw_vals.is_empty() {
+                        // Python の dict(a=1, b=2) 互換。位置引数があれば
+                        // 既存セマンティクス (コピー/タプル列) で初期化してから
+                        // キーワード引数を上書き挿入する
+                        if name == "dict" {
+                            let mut map = if arg_vals.is_empty() {
+                                IndexMap::new()
+                            } else {
+                                match func(&arg_vals)? {
+                                    Value::Dict(m) => m,
+                                    _ => return Err(EvalError::TypeError),
+                                }
+                            };
+                            for (k, v) in kw_vals {
+                                map.insert(k, v);
+                            }
+                            return Ok((Value::Dict(map), new_env));
+                        }
+                        return Err(EvalError::ArgError(name));
+                    }
                     let res_val = func(&arg_vals)?;
                     Ok((res_val, new_env))
                 }
@@ -1223,6 +1324,18 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
             };
 
             Ok((result, cur_env))
+        }
+        Expr::Attr { object, name } => {
+            // 括弧なしのドットアクセス。dict に対しては d.key == d['key'] として
+            // 評価する (xacro の load_yaml が返す YamlDictWrapper 互換)
+            let (obj_val, env) = eval_expr(*object, env)?;
+            match obj_val {
+                Value::Dict(m) => match m.get(&name) {
+                    Some(v) => Ok((v.clone(), env)),
+                    None => Err(EvalError::AttrError(name)),
+                },
+                _ => Err(EvalError::AttrError(name)),
+            }
         }
     }
 }
@@ -2165,9 +2278,11 @@ fn do_dict_method(
             let default_val = args.get(1).unwrap_or(&Value::Number(0.0)).clone();
             // ここでは省略時に Number(0.0) など、適当に
             let keys_list = match iterable {
-                Value::List(v) => v.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
-                Value::Tuple(v) => v.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
-                Value::Set(v) => v.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
+                // extract_key で正規化 (to_string() だと文字列キーがクォート付きになる)
+                Value::List(v) | Value::Tuple(v) | Value::Set(v) => v
+                    .iter()
+                    .map(extract_key)
+                    .collect::<Result<Vec<_>, _>>()?,
                 Value::Dict(m) => m.keys().cloned().collect::<Vec<_>>(),
                 // Python だと文字列を1文字ずつイテレートするなどあるが、ここでは簡易実装
                 _ => return Err(EvalError::TypeError),

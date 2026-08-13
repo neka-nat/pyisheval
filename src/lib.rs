@@ -1332,4 +1332,60 @@ mod test {
         interp.eval("var = 'foo'").unwrap();
         assert_eq!(interp.eval("var not in ['bar', 'baz']").unwrap(), Value::Number(1.0));
     }
+
+    #[test]
+    fn test_dict_keyword_arguments() {
+        let mut interp = Interpreter::new();
+        // Python-style dict(a=1, b=2) — xacro pattern: ${dict(lower=0.0, upper=0.0)}
+        assert_eq!(
+            interp.eval("dict(lower=0.5, upper=1.5)['upper']").unwrap(),
+            Value::Number(1.5)
+        );
+        // 位置引数 (dict コピー) + キーワード引数の併用: dict(d, b=2)
+        interp.eval("base = dict([('a', 1)])").unwrap();
+        assert_eq!(
+            interp.eval("dict(base, b=2)['b']").unwrap(),
+            Value::Number(2.0)
+        );
+        assert_eq!(
+            interp.eval("dict(base, b=2)['a']").unwrap(),
+            Value::Number(1.0)
+        );
+        // キーワード引数は呼び出し元の環境を汚染しない
+        interp.eval("dict(polluted=1)").unwrap();
+        assert!(interp.eval("polluted").is_err());
+        // dict 以外の組み込みへのキーワード引数はエラー
+        assert!(interp.eval("len(x=1)").is_err());
+    }
+
+    #[test]
+    fn test_dict_attribute_access() {
+        let mut interp = Interpreter::new();
+        // xacro の load_yaml 結果へのドットアクセス互換: d.key == d['key']
+        interp
+            .eval("p = dict([('plate', dict([('max', dict(z=0.02))]))])")
+            .unwrap();
+        assert_eq!(interp.eval("p.plate.max.z").unwrap(), Value::Number(0.02));
+        assert_eq!(
+            interp.eval("p['plate'].max['z']").unwrap(),
+            Value::Number(0.02)
+        );
+        // 存在しないキーは AttrError
+        assert!(interp.eval("p.missing").is_err());
+        // メソッド呼び出しは従来どおり
+        assert_eq!(
+            interp.eval("p.get('missing', 7)").unwrap(),
+            Value::Number(7.0)
+        );
+    }
+
+    #[test]
+    fn test_math_builtins() {
+        let mut interp = Interpreter::new();
+        // xacro は Python の math.* を公開するため互換で持つ
+        assert_eq!(interp.eval("fabs(-2.5)").unwrap(), Value::Number(2.5));
+        assert_eq!(interp.eval("floor(2.7)").unwrap(), Value::Number(2.0));
+        assert_eq!(interp.eval("ceil(2.1)").unwrap(), Value::Number(3.0));
+        assert_eq!(interp.eval("sqrt(9)").unwrap(), Value::Number(3.0));
+    }
 }

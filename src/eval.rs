@@ -20,6 +20,10 @@ impl PartialEq for Env {
 
 #[derive(Debug, Clone)]
 pub enum Value {
+    /// Python's `None`. Bound as a constant in the base environment (like
+    /// `True` / `False`), so `None`, `x == None` and `if None` all behave as
+    /// Python does.
+    None,
     Number(f64),
     Lambda {
         param: String,
@@ -95,6 +99,9 @@ impl PartialEq for Value {
                 a_meth == b_meth && a_rec == b_rec
             }
 
+            // None is only equal to None (the catch-all below covers None vs. anything else)
+            (Value::None, Value::None) => true,
+
             // Different types are never equal
             (_, _) => false,
         }
@@ -122,6 +129,7 @@ fn write_escaped_string(f: &mut std::fmt::Formatter<'_>, s: &str) -> std::fmt::R
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Value::None => write!(f, "None"),
             Value::Number(n) => write!(f, "{}", n),
             Value::Lambda { param, .. } => write!(f, "<lambda {}>", param),
             Value::Builtin { name, .. } => write!(f, "<builtin {}>", name),
@@ -179,6 +187,10 @@ impl std::fmt::Display for Value {
 impl Value {
     pub fn to_bool(&self) -> bool {
         match self {
+            // Must precede the `_ => true` catch-all below: `bool(None)` is False.
+            // This is the truthiness used by `not` / `and` / `or`; the free
+            // `is_truthy` below is the one used by `if` and comprehensions.
+            Value::None => false,
             Value::Number(n) => *n != 0.0,
             Value::StringLit(s) => !s.is_empty(),
             Value::List(v) => !v.is_empty(),
@@ -803,6 +815,7 @@ impl Interpreter {
         // Python boolean constants
         base_env.set("True", Value::Number(1.0));
         base_env.set("False", Value::Number(0.0));
+        base_env.set("None", Value::None);
 
         Interpreter {
             env: Rc::new(RefCell::new(base_env)),
@@ -1342,6 +1355,8 @@ pub fn eval_expr(expr: Expr, env: Rc<RefCell<Env>>) -> Result<(Value, Rc<RefCell
 
 fn is_truthy(val: &Value) -> bool {
     match val {
+        // Must precede the `_ => true` catch-all below: `bool(None)` is False
+        Value::None => false,
         Value::Number(n) => *n != 0.0,
         Value::StringLit(s) => !s.is_empty(),
         Value::List(v) => !v.is_empty(),

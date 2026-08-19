@@ -516,6 +516,33 @@ mod test {
     }
 
     #[test]
+    fn test_none_constant() {
+        let mut interp = Interpreter::new();
+        // `None` evaluates and prints like Python's
+        assert_eq!(interp.eval("None").unwrap().to_string(), "None");
+        assert_eq!(interp.eval("str(None)").unwrap().to_string(), "'None'");
+    }
+
+    #[test]
+    fn test_none_equality_and_truthiness() {
+        let mut interp = Interpreter::new();
+        // None is equal to None and to nothing else -- the idiom behind
+        // `<xacro:if value="${arg == None}">` for optional macro parameters
+        assert_eq!(interp.eval("None == None").unwrap().to_string(), "1");
+        assert_eq!(interp.eval("None != None").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("'robot' == None").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("None == 0").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("None == ''").unwrap().to_string(), "0");
+        assert_eq!(interp.eval("'robot' != None").unwrap().to_string(), "1");
+        // bool(None) is False
+        assert_eq!(interp.eval("1 if None else 2").unwrap().to_string(), "2");
+        assert_eq!(interp.eval("not None").unwrap().to_string(), "1");
+        // `and` / `or` short-circuit on the same truthiness (Value::to_bool)
+        assert_eq!(interp.eval("None or 5").unwrap().to_string(), "5");
+        assert_eq!(interp.eval("None and 5").unwrap().to_string(), "None");
+    }
+
+    #[test]
     fn test_builtin_constants_comparisons() {
         let mut interp = Interpreter::new();
         // True == 1

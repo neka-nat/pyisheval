@@ -1414,5 +1414,37 @@ mod test {
         assert_eq!(interp.eval("floor(2.7)").unwrap(), Value::Number(2.0));
         assert_eq!(interp.eval("ceil(2.1)").unwrap(), Value::Number(3.0));
         assert_eq!(interp.eval("sqrt(9)").unwrap(), Value::Number(3.0));
+        assert_eq!(interp.eval("atan(0)").unwrap(), Value::Number(0.0));
+        assert_eq!(interp.eval("sin(0)").unwrap(), Value::Number(0.0));
+        assert_eq!(interp.eval("cos(0)").unwrap(), Value::Number(1.0));
+        assert_eq!(interp.eval("pow(2, 3)").unwrap(), Value::Number(8.0));
+        assert_eq!(interp.eval("hypot(3, 4)").unwrap(), Value::Number(5.0));
+
+        let atan2 = match interp.eval("atan2(1, 0)").unwrap() {
+            Value::Number(n) => n,
+            other => panic!("Expected Number, got {:?}", other),
+        };
+        assert!((atan2 - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_math_builtins_reject_wrong_argument_counts() {
+        let mut interp = Interpreter::new();
+        for (expression, expected_name) in [
+            ("atan2(1)", "atan2"),
+            ("atan()", "atan"),
+            ("sin()", "sin"),
+            ("cos(0, 1)", "cos"),
+            ("pow(2)", "pow"),
+            ("hypot(3)", "hypot"),
+        ] {
+            assert!(
+                matches!(
+                    interp.eval(expression),
+                    Err(EvalError::ArgError(name)) if name == expected_name
+                ),
+                "Expected an argument error for {expression}"
+            );
+        }
     }
 }

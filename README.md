@@ -8,7 +8,7 @@ It's not a full Python interpreter, but it supports a subset of Python-like synt
 - Arithmetic and comparison operations: `+`, `-`, `*`, `/`, `//`, `%`, `**`, `>`, `<`, `>=`, `<=`, `==`, `!=`, `in`, `not in`
 - Variables and assignments
 - Lambda expressions (`lambda x: x + 1`)
-- Built-in functions: `abs`, `max`, `min`, `int`, `float`, `len`, `sum`, `str`, `dict`, `list`, `tuple`, `set`, etc.
+- Built-in functions: `abs`, `max`, `min`, `int`, `float`, `len`, `sum`, `str`, `dict`, `list`, `tuple`, `set`, and math functions such as `sin`, `cos`, `atan`, `atan2`, `pow`, `sqrt`, and `hypot`
 - List and dictionary literals
 - List comprehensions: `[y * 2 for y in x]`
 - Conditional expressions: `x if x > 5 else 0`

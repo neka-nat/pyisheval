@@ -241,6 +241,48 @@ fn builtin_sqrt(args: &[f64]) -> Result<f64, EvalError> {
     Ok(args[0].sqrt())
 }
 
+fn builtin_atan2(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 2 {
+        return Err(EvalError::ArgError("atan2".to_string()));
+    }
+    Ok(args[0].atan2(args[1]))
+}
+
+fn builtin_atan(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("atan".to_string()));
+    }
+    Ok(args[0].atan())
+}
+
+fn builtin_sin(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("sin".to_string()));
+    }
+    Ok(args[0].sin())
+}
+
+fn builtin_cos(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 1 {
+        return Err(EvalError::ArgError("cos".to_string()));
+    }
+    Ok(args[0].cos())
+}
+
+fn builtin_pow(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 2 {
+        return Err(EvalError::ArgError("pow".to_string()));
+    }
+    Ok(args[0].powf(args[1]))
+}
+
+fn builtin_hypot(args: &[f64]) -> Result<f64, EvalError> {
+    if args.len() != 2 {
+        return Err(EvalError::ArgError("hypot".to_string()));
+    }
+    Ok(args[0].hypot(args[1]))
+}
+
 fn builtin_max(args: &[f64]) -> Result<f64, EvalError> {
     if args.is_empty() {
         return Err(EvalError::ArgError("max".to_string()));
@@ -690,6 +732,48 @@ impl Interpreter {
             Value::Builtin {
                 name: "sqrt".to_string(),
                 func: builtin_sqrt,
+            },
+        );
+        base_env.set(
+            "atan2",
+            Value::Builtin {
+                name: "atan2".to_string(),
+                func: builtin_atan2,
+            },
+        );
+        base_env.set(
+            "atan",
+            Value::Builtin {
+                name: "atan".to_string(),
+                func: builtin_atan,
+            },
+        );
+        base_env.set(
+            "sin",
+            Value::Builtin {
+                name: "sin".to_string(),
+                func: builtin_sin,
+            },
+        );
+        base_env.set(
+            "cos",
+            Value::Builtin {
+                name: "cos".to_string(),
+                func: builtin_cos,
+            },
+        );
+        base_env.set(
+            "pow",
+            Value::Builtin {
+                name: "pow".to_string(),
+                func: builtin_pow,
+            },
+        );
+        base_env.set(
+            "hypot",
+            Value::Builtin {
+                name: "hypot".to_string(),
+                func: builtin_hypot,
             },
         );
         base_env.set(
